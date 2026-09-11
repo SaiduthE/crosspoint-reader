@@ -21,6 +21,13 @@ By default the script scans the src/ and lib/ trees for STR_* references and
 reports any translation keys that are never used.  Pass --strip-unused to
 omit those keys from the generated output entirely.
 
+Every language in the directory is compiled in unless a keep-list is given:
+--languages EN,FR on the command line, or custom_i18n_languages = EN, FR in a
+PlatformIO env. The Language enum always stays complete (code such as the
+keyboard-layout table names specific languages); a language outside the
+keep-list has no string data, resolves to English, and is left out of the
+language menu. English is always kept. Each language is roughly 20 KB of flash.
+
 Usage:
     python gen_i18n.py [translations_dir [output_dir]] [options]
 
@@ -29,6 +36,7 @@ Examples:
     python gen_i18n.py lib/I18n/translations lib/I18n/
     python gen_i18n.py --strip-unused
     python gen_i18n.py --strip-unused --src-dirs src lib/EpdFont
+    python gen_i18n.py --languages EN,FR
 """
 
 import sys
@@ -438,6 +446,32 @@ def compute_character_set(translations: Dict[str, List[str]], lang_index: int) -
 
 
 # ---------------------------------------------------------------------------
+# Language keep-list
+# ---------------------------------------------------------------------------
+
+
+def select_languages(languages: List[str], keep: Optional[str]) -> List[bool]:
+    """
+    Return one flag per language: True if its strings are compiled in.
+
+    *keep* is a comma-separated list of _language_code values (case-insensitive,
+    whitespace ignored). None or empty keeps everything. English is always kept.
+    An unknown code is an error rather than a silent no-op.
+    """
+    if not keep or not keep.strip():
+        return [True] * len(languages)
+    wanted = {c.strip().upper() for c in keep.split(",") if c.strip()}
+    wanted.add("EN")
+    unknown = sorted(wanted - set(languages))
+    if unknown:
+        raise ValueError(
+            f"Unknown language code(s) in keep-list: {', '.join(unknown)}. "
+            f"Available: {', '.join(languages)}"
+        )
+    return [code in wanted for code in languages]
+
+
+# ---------------------------------------------------------------------------
 # Code generators
 # ---------------------------------------------------------------------------
 
@@ -449,8 +483,10 @@ def generate_keys_header(
     string_keys: List[str],
     output_path: str,
     verbose: bool = False,
+    compiled: Optional[List[bool]] = None,
 ) -> None:
     """Generate I18nKeys.h."""
+    compiled = compiled or [True] * len(languages)
     lines: List[str] = [
         "#pragma once",
         "#include <cstdint>",
@@ -462,7 +498,9 @@ def generate_keys_header(
         "namespace i18n_strings {",
     ]
 
-    for code in languages:
+    for code, present in zip(languages, compiled):
+        if not present:
+            continue
         lines.append(f"extern const char STRINGS_{code}_DATA[];")
         lines.append(f"extern const uint16_t OFFSETS_{code}[];")
 
@@ -510,10 +548,13 @@ def generate_keys_header(
     lines.append("")
 
     # getLanguageStrings helper
-    lines.append("// Helper function to get string data for a language")
+    lines.append("// Helper function to get string data for a language.")
+    lines.append("// A language with no compiled-in strings falls through to English.")
     lines.append("inline LangStrings getLanguageStrings(Language lang) {")
     lines.append("  switch (lang) {")
-    for code in languages:
+    for code, present in zip(languages, compiled):
+        if not present:
+            continue
         lines.append(f"    case Language::{code}:")
         lines.append(
             f"      return {{i18n_strings::STRINGS_{code}_DATA, i18n_strings::OFFSETS_{code}}};"
@@ -539,7 +580,7 @@ def generate_keys_header(
     # (English first, then by _bcp47 tag alphabetically)
     english_idx = languages.index("EN")
     rest = sorted(
-        (i for i in range(len(languages)) if i != english_idx),
+        (i for i in range(len(languages)) if i != english_idx and compiled[i]),
         key=lambda i: language_bcp47[i],
     )
     sorted_indices = [english_idx] + rest
@@ -552,8 +593,16 @@ def generate_keys_header(
         "};"
     )
     lines.append("")
+    lines.append("")
+    lines.append("// Languages with string data compiled in: the ones the language menu offers.")
+    lines.append("// Smaller than getLanguageCount() when the build uses a keep-list; the enum")
+    lines.append("// itself stays complete so code naming a specific language still compiles.")
     lines.append(
-        "static_assert(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]) == getLanguageCount(),"
+        "constexpr uint8_t SELECTABLE_LANGUAGE_COUNT = "
+        "sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]);"
+    )
+    lines.append(
+        "static_assert(SELECTABLE_LANGUAGE_COUNT <= getLanguageCount(),"
     )
     lines.append('              "SORTED_LANGUAGE_INDICES size mismatch");')
     lines.append("")
@@ -582,8 +631,10 @@ def generate_strings_header(
     language_names: List[str],
     output_path: str,
     verbose: bool = False,
+    compiled: Optional[List[bool]] = None,
 ) -> None:
     """Generate I18nStrings.h."""
+    compiled = compiled or [True] * len(languages)
     lines: List[str] = [
         "#pragma once",
         '#include "I18nKeys.h"',
@@ -595,7 +646,9 @@ def generate_strings_header(
         "",
     ]
 
-    for code in languages:
+    for code, present in zip(languages, compiled):
+        if not present:
+            continue
         lines.append(f"extern const char STRINGS_{code}_DATA[];")
         lines.append(f"extern const uint16_t OFFSETS_{code}[];")
 
@@ -611,8 +664,10 @@ def generate_strings_cpp(
     translations: Dict[str, List[str]],
     output_path: str,
     verbose: bool = False,
+    compiled: Optional[List[bool]] = None,
 ) -> None:
     """Generate I18nStrings.cpp."""
+    compiled = compiled or [True] * len(languages)
     lines: List[str] = [
         "// THIS FILE IS AUTO-GENERATED BY gen_i18n.py. DO NOT EDIT.",
         "// clang-format off",
@@ -642,7 +697,9 @@ def generate_strings_cpp(
     lines.append("// Character sets for each language")
     lines.append("const char* const CHARACTER_SETS[] = {")
     for lang_idx, name in enumerate(language_names):
-        charset = compute_character_set(translations, lang_idx)
+        # A language that is not compiled in renders English, so its glyph
+        # needs are English's.
+        charset = compute_character_set(translations, lang_idx if compiled[lang_idx] else 0)
         _append_string_entry(lines, charset, comment=name)
     lines.append("};")
     lines.append("")
@@ -657,6 +714,8 @@ def generate_strings_cpp(
     en_offsets: List[int] = []
 
     for lang_idx, code in enumerate(languages):
+        if not compiled[lang_idx]:
+            continue
         lang_strings = [translations[key][lang_idx] for key in string_keys]
         is_english = lang_idx == 0
 
@@ -714,7 +773,9 @@ def generate_strings_cpp(
 
     # Compile-time size checks
     lines.append("// Compile-time validation of array sizes")
-    for code in languages:
+    for code, present in zip(languages, compiled):
+        if not present:
+            continue
         lines.append(
             f"static_assert(sizeof(i18n_strings::OFFSETS_{code}) "
             f"/ sizeof(i18n_strings::OFFSETS_{code}[0]) =="
@@ -834,6 +895,7 @@ def main(
     src_dirs: Optional[List[str]] = None,
     strip_unused: bool = False,
     verbose: bool = False,
+    languages_keep: Optional[str] = None,
 ) -> None:
     # Default paths (relative to project root)
     default_translations_dir = "lib/I18n/translations"
@@ -841,7 +903,9 @@ def main(
     default_src_dirs = ["src", "lib"]
 
     if translations_dir is None or output_dir is None:
-        if len(sys.argv) == 3:
+        # Legacy positional form. Guarded so a lone `--option value` pair is not
+        # mistaken for it.
+        if len(sys.argv) == 3 and not sys.argv[1].startswith("-"):
             translations_dir = sys.argv[1]
             output_dir = sys.argv[2]
         else:
@@ -869,6 +933,10 @@ def main(
         languages, language_names, language_bcp47, string_keys, translations, inherited_sets = (
             load_translations(translations_dir, verbose)
         )
+        compiled = select_languages(languages, languages_keep)
+        if not all(compiled):
+            kept = [c for c, k in zip(languages, compiled) if k]
+            print(f"  Keep-list: compiling {len(kept)} of {len(languages)} languages: {', '.join(kept)}")
 
         # --- Unused-string detection ---
         scan_dirs = [d for d in src_dirs if os.path.isdir(d)]
@@ -934,10 +1002,11 @@ def main(
 
         out = Path(output_dir)
         generate_keys_header(
-            languages, language_names, language_bcp47, string_keys, str(out / "I18nKeys.h"), verbose
+            languages, language_names, language_bcp47, string_keys, str(out / "I18nKeys.h"), verbose,
+            compiled=compiled,
         )
         generate_strings_header(
-            languages, language_names, str(out / "I18nStrings.h"), verbose
+            languages, language_names, str(out / "I18nStrings.h"), verbose, compiled=compiled
         )
         generate_strings_cpp(
             languages,
@@ -946,11 +1015,12 @@ def main(
             translations,
             str(out / "I18nStrings.cpp"),
             verbose,
+            compiled=compiled,
         )
 
         print()
         print("Code generation complete!")
-        print(f"  Languages: {len(languages)}")
+        print(f"  Languages: {len(languages)} ({sum(compiled)} compiled in)")
         print(f"  String keys: {len(string_keys)}")
         if unused_set and not strip_unused:
             print(
@@ -998,6 +1068,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Print per-key INFO/WARNING messages and file generation details",
     )
+    parser.add_argument(
+        "--languages",
+        metavar="CODES",
+        default=None,
+        help="Comma-separated _language_code keep-list, e.g. EN,FR (default: all; English always kept)",
+    )
     args = parser.parse_args()
     main(
         args.translations_dir,
@@ -1005,10 +1081,12 @@ if __name__ == "__main__":
         args.src_dirs,
         args.strip_unused,
         args.verbose,
+        args.languages,
     )
 else:
     try:
         Import("env")
-        main(strip_unused=True)
+        # Per-env keep-list, e.g.  custom_i18n_languages = EN, FR  in platformio.ini.
+        main(strip_unused=True, languages_keep=env.GetProjectOption("custom_i18n_languages", ""))
     except NameError:
         pass

@@ -22,7 +22,8 @@ class LanguageSelectActivity final : public UiListActivity {
   void activateIndex(int index) override;
   const char* headerTitle() const override;
 
-  constexpr static uint8_t totalItems = getLanguageCount();
+  // Only languages with strings compiled in are offered; see gen_i18n.py keep-list.
+  constexpr static uint8_t totalItems = SELECTABLE_LANGUAGE_COUNT;
 
   // Row storage: totalItems is a compile-time constant, so a fixed-capacity
   // array avoids any heap allocation for the row list. Built once in
