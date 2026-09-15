@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>CrossPoint Games</title>
+    <style>
+      :root {
+        --font-color: #333;
+        --bg: #f5f5f5;
+        --title-color: #2c3e50;
+        --card-bg: #fff;
+        --label-color: #7f8c8d;
+        --border-color: #ddd;
+        --accent-color: rgb(110, 154, 130);
+        --accent-hover-color: #5a8c73;
+        --red: #b5433a;
+        --blue: #3a5fb5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --font-color: #f5f5f5;
+          --bg: #262626;
+          --title-color: #ecf0f1;
+          --card-bg: #3a3a3a;
+          --label-color: #bdc3c7;
+          --border-color: #555;
+          --red: #e0736a;
+          --blue: #7f9be0;
+          color-scheme: dark;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
+        max-width: 560px;
+        margin: 0 auto;
+        padding: 16px;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        background: var(--bg);
+        color: var(--font-color);
+      }
+      h1 { font-size: 1.3rem; color: var(--title-color); margin: 0 0 4px; }
+      .sub { color: var(--label-color); font-size: 0.9rem; margin-bottom: 12px; }
+      .card {
+        background: var(--card-bg);
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+      }
+      button {
+        font: inherit;
+        padding: 12px 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--card-bg);
+        color: var(--font-color);
+        cursor: pointer;
+        min-height: 44px;
+      }
+      button.primary { background: var(--accent-color); border-color: var(--accent-color); color: #fff; }
+      button.primary:active { background: var(--accent-hover-color); }
+      button:disabled { opacity: 0.45; cursor: default; }
+      input {
+        font: inherit;
+        padding: 11px;
+        width: 100%;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--font-color);
+      }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .row > * { flex: 1 1 auto; }
+      .stack > * + * { margin-top: 8px; }
+      .word { font-size: 1.8rem; font-weight: 700; text-align: center; padding: 18px 8px; letter-spacing: 0.02em; }
+      .muted { color: var(--label-color); font-size: 0.85rem; }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 99px; background: var(--bg); font-size: 0.8rem; }
+      ul.players { list-style: none; padding: 0; margin: 0; }
+      ul.players li { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border-color); }
+      ul.players li:last-child { border-bottom: none; }
+      .grid5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+      .grid5 button { padding: 6px 2px; min-height: 52px; font-size: 0.68rem; font-weight: 600; word-break: break-word; }
+      .tile-red { background: var(--red); color: #fff; border-color: var(--red); }
+      .tile-blue { background: var(--blue); color: #fff; border-color: var(--blue); }
+      .tile-neutral { background: #c9bda6; color: #2b2b2b; border-color: #b6a98c; }
+      .tile-assassin { background: #1e1e1e; color: #fff; border-color: #000; }
+      .tile-done { opacity: 0.55; text-decoration: line-through; }
+      .grid10 { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; }
+      .grid10 button { padding: 0; min-height: 0; aspect-ratio: 1; font-size: 0.6rem; border-radius: 4px; }
+      .cell-ship { background: var(--accent-color); border-color: var(--accent-color); color: #fff; }
+      .cell-hit { background: var(--red); border-color: var(--red); color: #fff; }
+      .cell-miss { background: var(--border-color); color: var(--label-color); }
+      .die { font-size: 3rem; text-align: center; font-weight: 700; }
+      .err { color: var(--red); font-size: 0.85rem; min-height: 1.2em; }
+    </style>
+  </head>
+  <body>
+    <h1 id="title">CrossPoint Games</h1>
+    <div class="sub" id="status">Connecting to the reader...</div>
+    <div id="main"></div>
+    <div class="err" id="err"></div>
+    <script>
+      var token = null;
+      try { token = localStorage.getItem("cpgToken"); } catch (e) { token = null; }
+      var state = null;
+      var lastVersion = -1;
+      var lastRender = "";
+      var orientation = "h";
+      var placingShip = 0;
+      var clueWord = "";
+      var clueCount = 1;
+
+      function el(id) { return document.getElementById(id); }
+      function esc(s) { return String(s == null ? "" : s); }
+      function fail(msg) { el("err").textContent = msg || ""; }
+
+      function api(path, then) {
+        fetch(path, { method: "POST" })
+          .then(function (r) { return r.json(); })
+          .then(function (data) { fail(""); apply(data); if (then) then(data); })
+          .catch(function () { fail("Lost the reader - retrying"); });
+      }
+
+      function act(verb, a, b, c, text) {
+        if (!token) return;
+        var url = "/api/game/act?t=" + token + "&v=" + verb;
+        if (a !== undefined && a !== null) url += "&a=" + a;
+        if (b !== undefined && b !== null) url += "&b=" + b;
+        if (c !== undefined && c !== null) url += "&c=" + c;
+        if (text) url += "&s=" + encodeURIComponent(text);
+        api(url);
+      }
+
+      function join() {
+        var name = el("nameInput").value.trim();
+        if (!name) { fail("Pick a name first"); return; }
+        api("/api/game/join?name=" + encodeURIComponent(name), function (data) {
+          if (data.t) {
+            token = data.t;
+            try { localStorage.setItem("cpgToken", token); } catch (e) {}
+          } else {
+            fail(data.error || "The table is full");
+          }
+        });
+      }
+
+      function leave() {
+        if (token) api("/api/game/leave?t=" + token);
+        token = null;
+        try { localStorage.removeItem("cpgToken"); } catch (e) {}
+        poll();
+      }
+
+      function poll() {
+        fetch("/api/game/state" + (token ? "?t=" + token : ""))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { fail(""); apply(data); })
+          .catch(function () { fail("Lost the reader - retrying"); });
+      }
+
+      function apply(data) {
+        if (!data || data.v === undefined) return;
+        // The device rejoins a phone whose seat was recycled, so trust the reply.
+        if (data.seat === -1 && token && data.phase === "lobby") {
+          token = null;
+          try { localStorage.removeItem("cpgToken"); } catch (e) {}
+        }
+        state = data;
+        render();
+      }
+
+      function button(label, cls, onClick, disabled) {
+        var b = document.createElement("button");
+        b.textContent = label;
+        if (cls) b.className = cls;
+        if (disabled) b.disabled = true;
+        else b.onclick = onClick;
+        return b;
+      }
+
+      function card(children) {
+        var d = document.createElement("div");
+        d.className = "card";
+        for (var i = 0; i < children.length; i++) if (children[i]) d.appendChild(children[i]);
+        return d;
+      }
+
+      function text(tag, content, cls) {
+        var e = document.createElement(tag);
+        e.textContent = content;
+        if (cls) e.className = cls;
+        return e;
+      }
+
+      function rowOf(buttons) {
+        var d = document.createElement("div");
+        d.className = "row";
+        for (var i = 0; i < buttons.length; i++) if (buttons[i]) d.appendChild(buttons[i]);
+        return d;
+      }
+
+      function render() {
+        var s = state;
+        el("title").textContent = s.title || "CrossPoint Games";
+        el("status").textContent = s.status || "";
+        var main = el("main");
+
+        // Repainting on every poll would eat the focus in the name and clue
+        // fields, so only rebuild when the device says something changed.
+        var signature = s.v + "|" + s.seat + "|" + s.phase + "|" + orientation + "|" + placingShip;
+        if (signature === lastRender) return;
+        lastRender = signature;
+        main.innerHTML = "";
+
+        if (s.seat === -1) { main.appendChild(joinCard(s)); main.appendChild(playerCard(s)); return; }
+        if (s.phase === "lobby") { main.appendChild(lobbyCard(s)); main.appendChild(playerCard(s)); return; }
+
+        var g = s.g || {};
+        if (s.game === "undercover") main.appendChild(undercoverCard(s, g));
+        else if (s.game === "codenames") main.appendChild(codenamesCard(s, g));
+        else if (s.game === "battleship") main.appendChild(battleshipCard(s, g));
+        else if (s.game === "ludo") main.appendChild(ludoCard(s, g));
+
+        if (s.over) main.appendChild(overCard(s, g));
+        main.appendChild(playerCard(s));
+      }
+
+      function joinCard(s) {
+        var input = document.createElement("input");
+        input.id = "nameInput";
+        input.placeholder = "Your name";
+        input.maxLength = 12;
+        input.onkeydown = function (e) { if (e.key === "Enter") join(); };
+        var wrap = document.createElement("div");
+        wrap.className = "stack";
+        wrap.appendChild(text("div", s.phase === "lobby" ? "Join the table" : "A round is in progress - you can watch", "muted"));
+        wrap.appendChild(input);
+        wrap.appendChild(button("Join", "primary", join, s.phase !== "lobby"));
+        return card([wrap]);
+      }
+
+      function lobbyCard(s) {
+        var kids = [text("div", s.host ? "You are the host" : "Waiting for the host to start", "muted")];
+        if (s.host && s.games) {
+          var picker = document.createElement("div");
+          picker.className = "row";
+          for (var i = 0; i < s.games.length; i++) {
+            (function (game) {
+              var b = button(game.t + " (" + game.min + "+)", game.k === s.game ? "primary" : "", function () {
+                act("pick", game.i);
+              });
+              picker.appendChild(b);
+            })(s.games[i]);
+          }
+          kids.push(picker);
+          kids.push(button("Start " + s.title, "primary", function () { act("next"); }, !s.canStart));
+        }
+        kids.push(button("Leave the table", "", leave));
+        var wrap = document.createElement("div");
+        wrap.className = "stack";
+        for (var k = 0; k < kids.length; k++) wrap.appendChild(kids[k]);
+        return card([wrap]);
+      }
+
+      function playerCard(s) {
+        var list = document.createElement("ul");
+        list.className = "players";
+        for (var i = 0; i < (s.players || []).length; i++) {
+          var p = s.players[i];
+          var li = document.createElement("li");
+          li.appendChild(text("span", p.n + (p.s === s.seat ? " (you)" : "")));
+          var tags = document.createElement("span");
+          if (p.host) tags.appendChild(text("span", "host", "pill"));
+          if (p.away) tags.appendChild(text("span", " away", "pill"));
+          li.appendChild(tags);
+          list.appendChild(li);
+        }
+        return card([text("div", (s.players || []).length + " at the table", "muted"), list]);
+      }
+
+      function overCard(s) {
+        if (!s.host) return card([text("div", "Round over - the host decides what is next", "muted")]);
+        return card([
+          rowOf([
+            button("Play again", "primary", function () { act("next"); }),
+            button("Back to the lobby", "", function () { act("ready"); }),
+          ]),
+        ]);
+      }
+
+      function undercoverCard(s, g) {
+        var wrap = document.createElement("div");
+        wrap.className = "stack";
+        wrap.appendChild(text("div", "Your word", "muted"));
+        wrap.appendChild(text("div", g.word || "-", "word"));
+        if (g.msg) wrap.appendChild(text("div", g.msg, "muted"));
+
+        if (!g.alive) {
+          wrap.appendChild(text("div", "You are out - enjoy the show", "muted"));
+        } else if (g.phase === "describe") {
+          wrap.appendChild(button(g.ready ? "Waiting for the others" : "I have described mine", "primary",
+            function () { act("ready"); }, g.ready));
+        } else if (g.phase === "vote") {
+          wrap.appendChild(text("div", "Vote for the undercover", "muted"));
+          for (var i = 0; i < (g.seats || []).length; i++) {
+            (function (idx, seatInfo) {
+              if (!seatInfo.alive || idx === s.seat) return;
+              var name = (s.players.filter(function (p) { return p.s === idx; })[0] || {}).n || "Seat " + (idx + 1);
+              wrap.appendChild(button(name + (seatInfo.votes ? "  (" + seatInfo.votes + ")" : ""),
+                g.myVote === idx ? "primary" : "", function () { act("vote", idx); }));
+            })(i, g.seats[i]);
+          }
+        }
+        if (s.host && (g.phase === "describe" || g.phase === "vote" || g.phase === "reveal")) {
+          wrap.appendChild(button(g.phase === "reveal" ? "Next round" : "Move it along", "", function () { act("next"); }));
+        }
+        return card([wrap]);
+      }
+
+      function codenamesCard(s, g) {
+        var wrap = document.createElement("div");
+        wrap.className = "stack";
+        var mine = g.myTeam === g.turn;
+        wrap.appendChild(text("div",
+          (g.myTeam === 1 ? "Red" : "Blue") + (g.spymaster ? " spymaster" : " operative") +
+          " - " + (mine ? "your team is up" : "waiting for the other team"), "muted"));
+        if (g.msg) wrap.appendChild(text("div", g.msg, "muted"));
+
+        if (g.spymaster && mine && g.phase === "clue") {
+          var word = document.createElement("input");
+          word.placeholder = "Clue word";
+          word.maxLength = 16;
+          word.value = clueWord;
+          word.oninput = function () { clueWord = word.value; };
+          var count = document.createElement("input");
+          count.type = "number";
+          count.min = "0";
+          count.max = "9";
+          count.value = String(clueCount);
+          count.oninput = function () { clueCount = count.value; };
+          wrap.appendChild(word);
+          wrap.appendChild(count);
+          wrap.appendChild(button("Give the clue", "primary", function () {
+            var w = (clueWord || "").trim();
+            if (!w) { fail("A clue needs a word"); return; }
+            clueWord = "";
+            act("clue", parseInt(clueCount, 10) || 0, null, null, w);
+          }));
+        }
+
+        var grid = document.createElement("div");
+        grid.className = "grid5";
+        for (var i = 0; i < (g.tiles || []).length; i++) {
+          (function (idx, tile) {
+            var cls = "";
+            if (tile.k === 1) cls = "tile-red";
+            else if (tile.k === 2) cls = "tile-blue";
+            else if (tile.k === 3) cls = "tile-assassin";
+            else if (tile.k === 0) cls = "tile-neutral";
+            if (tile.r) cls += " tile-done";
+            var canGuess = mine && !g.spymaster && g.phase === "guess" && !tile.r;
+            grid.appendChild(button(tile.w, cls, function () { act("guess", idx); }, !canGuess));
+          })(i, g.tiles[i]);
+        }
+        wrap.appendChild(grid);
+
+        if (mine && !g.spymaster && g.phase === "guess") {
+          wrap.appendChild(button("Stop guessing", "", function () { act("pass"); }));
+        }
+        return card([wrap]);
+      }
+
+      function shipGrid(cells, onTap, enabled) {
+        var grid = document.createElement("div");
+        grid.className = "grid10";
+        for (var i = 0; i < 100; i++) {
+          (function (idx) {
+            var v = cells.charAt(idx);
+            var cls = v === "1" ? "cell-miss" : v === "2" ? "cell-hit" : v === "S" ? "cell-ship" : "";
+            var label = v === "2" ? "X" : v === "1" ? "·" : "";
+            grid.appendChild(button(label, cls, function () { onTap(idx % 10, Math.floor(idx / 10)); }, !enabled(idx)));
+          })(i);
+        }
+        return grid;
+      }
+
+      function battleshipCard(s, g) {
+        var wrap = document.createElement("div");
+        wrap.className = "stack";
+        if (g.me === -1) {
+          wrap.appendChild(text("div", "Battleship seats the first two players - watch the reader", "muted"));
+          return card([wrap]);
+        }
+        if (g.msg) wrap.appendChild(text("div", g.msg, "muted"));
+
+        if (g.phase === "place") {
+          var names = (g.ships || []).map(function (sh, i) { return (i === placingShip ? "> " : "") + sh.n + " (" + sh.len + ")"; });
+          wrap.appendChild(text("div", g.ready ? "Fleet locked in" : "Placing: " + names[placingShip], "muted"));
+          if (!g.ready) {
+            wrap.appendChild(rowOf([
+              button("Turn: " + (orientation === "h" ? "across" : "down"), "", function () {
+                orientation = orientation === "h" ? "v" : "h";
+                lastRender = "";
+                render();
+              }),
+              button("Next ship", "", function () {
+                placingShip = (placingShip + 1) % (g.ships || []).length;
+                lastRender = "";
+                render();
+              }),
+            ]));
+          }
+          var own = (g.fleet || "").replace(/[1-5]/g, "S");
+          wrap.appendChild(shipGrid(own, function (x, y) { act("place", placingShip, x, y, orientation); },
+            function () { return !g.ready; }));
+          if (!g.ready) {
+            wrap.appendChild(button("Ready (the rest go in at random)", "primary", function () { act("ready"); }));
+          }
+          return card([wrap]);
+        }
+
+        var myTurn = g.turn === g.me && g.phase === "fire";
+        wrap.appendChild(text("div", myTurn ? "Your shot" : "Waiting for the other captain", "muted"));
+        wrap.appendChild(shipGrid(g.outgoing || "", function (x, y) { act("fire", x, y); },
+          function (idx) { return myTurn && (g.outgoing || "").charAt(idx) === "0"; }));
+        wrap.appendChild(text("div", "Your waters", "muted"));
+        var mineCells = "";
+        for (var i = 0; i < 100; i++) {
+          var shot = (g.incoming || "").charAt(i);
+          mineCells += shot !== "0" ? shot : ((g.fleet || "").charAt(i) !== "0" ? "S" : "0");
+        }
+        wrap.appendChild(shipGrid(mineCells, function () {}, function () { return false; }));
+        return card([wrap]);
+      }
+
+      function ludoCard(s, g) {
+        var wrap = document.createElement("div");
+        wrap.className = "stack";
+        if (g.me === -1) {
+          wrap.appendChild(text("div", "Ludo seats the first four players - watch the reader", "muted"));
+          return card([wrap]);
+        }
+        wrap.appendChild(text("div", "You are seat " + (g.me + 1) + (g.myTurn ? " - your turn" : ""), "muted"));
+        wrap.appendChild(text("div", g.die ? String(g.die) : "-", "die"));
+        if (g.msg) wrap.appendChild(text("div", g.msg, "muted"));
+
+        if (g.myTurn && g.phase === "roll") {
+          wrap.appendChild(button("Roll", "primary", function () { act("roll"); }));
+        } else if (g.myTurn && g.phase === "move") {
+          var tokens = (g.tokens || [])[g.me] || [];
+          for (var i = 0; i < (g.moves || []).length; i++) {
+            (function (tokenIndex) {
+              var at = tokens[tokenIndex];
+              var where = at === -1 ? "in the yard" : at >= 57 ? "home" : at >= 52 ? "on the home run" : "on square " + (at + 1);
+              wrap.appendChild(button("Token " + (tokenIndex + 1) + " - " + where, "primary", function () {
+                act("move", tokenIndex);
+              }));
+            })(g.moves[i]);
+          }
+        }
+        return card([wrap]);
+      }
+
+      poll();
+      setInterval(poll, 1200);
+    </script>
+  </body>
+</html>

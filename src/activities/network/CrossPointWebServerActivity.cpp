@@ -130,6 +130,8 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
   } else if (mode == NetworkMode::USB_DRIVE) {
     modeName = "USB Drive";
 #endif
+  } else if (mode == NetworkMode::GAME_NIGHT) {
+    modeName = "Game Night";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
@@ -139,6 +141,13 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     return;
   }
 #endif
+
+  if (mode == NetworkMode::GAME_NIGHT) {
+    // Game night owns the radio and its own HTTP server, so it replaces this
+    // activity rather than running inside it.
+    activityManager.goToGameNight();
+    return;
+  }
 
   networkMode = mode;
   isApMode = (mode == NetworkMode::CREATE_HOTSPOT);
