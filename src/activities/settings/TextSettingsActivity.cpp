@@ -176,13 +176,19 @@ bool TextSettingsActivity::handleCustomInput() {
 
 bool TextSettingsActivity::handleButtons() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
+    // Back climbs one level: rows -> tab band -> out, like the Settings screen.
+    if (ringPos() > 0) {
+      activeNav().selected = 0;
+      requestUpdate();
+    } else {
+      finish();
+    }
     return true;
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (ringPos() == 0) {
-      switchTab();
+      enterList();  // Up/Down choose the tab; Confirm opens it
     } else {
       activateRow(ringPos() - 1);
     }
@@ -244,8 +250,8 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
 
 const char* TextSettingsActivity::confirmLabelText() const {
   if (ringPos() == 0) {
-    // Confirm on the tab bar advances to the next tab.
-    return I18N.get(TAB_NAME_IDS[(static_cast<int>(tab_) + 1) % static_cast<int>(Tab::Count)]);
+    // Confirm on the tab bar opens the highlighted tab (Up/Down choose it).
+    return tr(STR_OPEN);
   }
   switch (tab_) {
     case Tab::Layout:
