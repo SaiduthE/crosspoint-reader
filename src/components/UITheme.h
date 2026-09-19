@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Arduino.h>
 #include <EpdFontFamily.h>
 
 #include <functional>
@@ -35,6 +36,14 @@ class UITheme {
   static UIIcon getFileIcon(const std::string& filename);
   static int getStatusBarHeight();
   static int getProgressBarHeight();
+
+  // Bench tuning without a reflash: patch one integer metric of the live
+  // (scaled) set by name, e.g. from the serial console's CMD:METRIC. The value
+  // is not persisted -- once a number is right it is baked into the theme
+  // table or the uiScale rules. Returns false for an unknown name.
+  // printMetrics() lists every tunable metric with its current value.
+  bool setMetric(const char* name, int value);
+  void printMetrics(Print& out) const;
 
  private:
   const ThemeMetrics* currentMetrics;

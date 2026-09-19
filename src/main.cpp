@@ -114,6 +114,23 @@ EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, 
 
 #endif  // OMIT_FONTS
 
+#if FREEINK_DEVICE_EMINIMAL
+// e-Minimal 7.8" (uiScale 1.5): the UI font slots are a tier, not a size, so
+// the 1.5x fonts are registered under the same IDs the theme already draws
+// with (UI_10 -> 15 px, UI_12 -> 18 px, small 8 -> 12 px). Row heights and
+// headers derive from the body font's line height, so the chrome scales with
+// them. The three families are only compiled in for this device (all.h).
+EpdFont smallFont(&notosans_12_small);
+EpdFontFamily smallFontFamily(&smallFont);
+
+EpdFont ui10RegularFont(&ubuntu_15_regular);
+EpdFont ui10BoldFont(&ubuntu_15_bold);
+EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
+
+EpdFont ui12RegularFont(&ubuntu_18_regular);
+EpdFont ui12BoldFont(&ubuntu_18_bold);
+EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+#else
 EpdFont smallFont(&notosans_8_regular);
 EpdFontFamily smallFontFamily(&smallFont);
 
@@ -124,6 +141,7 @@ EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
 EpdFont ui12RegularFont(&ubuntu_12_regular);
 EpdFont ui12BoldFont(&ubuntu_12_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+#endif
 
 // Definitions for SilentRestart.h. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
@@ -630,6 +648,21 @@ void loop() {
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd == "METRICS") {
+        // Bench layout tuning without a reflash (see UITheme::setMetric):
+        //   CMD:METRICS                       list every tunable metric
+        //   CMD:METRIC statusBarVerticalMargin 28   patch one and redraw
+        UITheme::getInstance().printMetrics(logSerial);
+      } else if (cmd.startsWith("METRIC ")) {
+        const int sp = cmd.indexOf(' ', 7);
+        const String name = sp > 0 ? cmd.substring(7, sp) : "";
+        const int value = sp > 0 ? cmd.substring(sp + 1).toInt() : 0;
+        if (UITheme::getInstance().setMetric(name.c_str(), value)) {
+          logSerial.printf("METRIC %s=%d\n", name.c_str(), value);
+          activityManager.requestUpdate();
+        } else {
+          logSerial.printf("METRIC unknown: %s (CMD:METRICS lists them)\n", name.c_str());
+        }
       }
     }
   }

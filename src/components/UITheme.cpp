@@ -1,11 +1,14 @@
 #include "UITheme.h"
 
+#include <BoardConfig.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <Logging.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <memory>
 
 #include "MappedInputManager.h"
@@ -53,12 +56,91 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   metricsValid = false;
 }
 
+namespace {
+// The theme metrics are pixel sizes tuned on ~220 PPI 4" panels. The fui
+// components derive their rows and headers from the UI font's line height, so
+// they follow a board's larger font tier by themselves, but the hand-placed
+// chrome (battery glyph, status bar lane, hint bar, home cover tile, popups,
+// keyboard) does not -- on the e-Minimal 7.8" the 1.5x fonts left the battery
+// squeezed and the reader footer against the glass edge. Scale those pixel
+// fields by the profile's uiScale. Ratios, percentages, enums and booleans
+// are left alone.
+void scaleMetrics(ThemeMetrics& m, const float s) {
+  if (s == 1.0f) return;
+  const auto sc = [s](int& v) { v = static_cast<int>(std::lround(v * s)); };
+  sc(m.batteryWidth);
+  sc(m.batteryHeight);
+  sc(m.topPadding);
+  // batteryBarHeight stays: the glyph is centred in that strip, so growing it
+  // only pushed the battery (and the header under it) down ~10 px.
+  sc(m.headerHeight);
+  sc(m.verticalSpacing);
+  sc(m.previewPadding);
+  sc(m.contentSidePadding);
+  sc(m.listRowHeight);
+  sc(m.listWithSubtitleRowHeight);
+  sc(m.listRowGap);
+  sc(m.listRowRadius);
+  sc(m.listInset);
+  sc(m.listSidePadding);
+  sc(m.listScrollWidth);
+  sc(m.headerSidePadding);
+  sc(m.headerUnderlineSize);
+  sc(m.menuRowHeight);
+  sc(m.menuSpacing);
+  sc(m.tabSpacing);
+  sc(m.tabBarHeight);
+  sc(m.scrollBarWidth);
+  sc(m.scrollBarRightOffset);
+  sc(m.homeTopPadding);
+  sc(m.homeCoverHeight);
+  sc(m.homeCoverTileHeight);
+  sc(m.homeMenuTopOffset);
+  sc(m.buttonHintsHeight);
+  sc(m.sideButtonHintsWidth);
+  sc(m.progressBarHeight);
+  sc(m.progressBarMarginTop);
+  sc(m.statusBarHorizontalMargin);
+  sc(m.statusBarVerticalMargin);
+  sc(m.keyboardKeyHeight);
+  sc(m.keyboardKeySpacing);
+  sc(m.keyboardVerticalOffset);
+  sc(m.popupMarginX);
+  sc(m.popupMarginY);
+  sc(m.popupFrameThickness);
+  sc(m.popupCornerRadius);
+  sc(m.popupTextBaselineOffsetY);
+  sc(m.popupProgressBarHeight);
+  sc(m.optionPopupItemSpacing);
+  sc(m.optionPopupInnerPadding);
+  sc(m.optionPopupSelectionVPadding);
+  sc(m.optionPopupDialogSideMargin);
+  sc(m.textFieldHorizontalPadding);
+  sc(m.textFieldNormalThickness);
+  sc(m.textFieldCursorThickness);
+  sc(m.textFieldLineEndOffset);
+  sc(m.controlRadius);
+  sc(m.sheetRadius);
+  sc(m.capsuleRadius);
+}
+}  // namespace
+
 const ThemeMetrics& UITheme::getMetrics() const {
   // hasTouch() can flip once touch init completes after static construction, so the
   // cached copy is refreshed when the flag differs instead of copying the struct per call.
   const bool touch = gpio.hasTouch();
   if (!metricsValid || touch != metricsForTouch) {
     adjustedMetrics = *currentMetrics;
+#if FREEINK_DEVICE_EMINIMAL
+    // Tied to the 1.5x font tier main.cpp registers for this device; the touch
+    // boards carry a uiScale too but keep the stock fonts, so they stay as is.
+    scaleMetrics(adjustedMetrics, BoardConfig::ACTIVE.uiScale);
+    // RoundedRaff shares the battery line with the header title; with the 18 px
+    // glyph the 24 px strip sat it visibly low. Judged on glass 2026-09-19 via
+    // CMD:METRIC: 0 (glyph centred on the band's top edge) is right. Lyra's
+    // detached 40 px strip is right as it is.
+    if (currentMetrics == &RoundedRaffMetrics::values) adjustedMetrics.batteryBarHeight = 0;
+#endif
     if (touch) {
       adjustedMetrics.buttonHintsHeight = 0;
     }
@@ -66,6 +148,86 @@ const ThemeMetrics& UITheme::getMetrics() const {
     metricsValid = true;
   }
   return adjustedMetrics;
+}
+
+namespace {
+struct MetricField {
+  const char* name;
+  int ThemeMetrics::*field;
+};
+// Every integer metric, by the name it has in ThemeMetrics. Ratios, percents,
+// enums and booleans are deliberately absent.
+constexpr MetricField kMetricFields[] = {
+    {"batteryWidth", &ThemeMetrics::batteryWidth},
+    {"batteryHeight", &ThemeMetrics::batteryHeight},
+    {"topPadding", &ThemeMetrics::topPadding},
+    {"batteryBarHeight", &ThemeMetrics::batteryBarHeight},
+    {"headerHeight", &ThemeMetrics::headerHeight},
+    {"verticalSpacing", &ThemeMetrics::verticalSpacing},
+    {"previewPadding", &ThemeMetrics::previewPadding},
+    {"contentSidePadding", &ThemeMetrics::contentSidePadding},
+    {"listRowHeight", &ThemeMetrics::listRowHeight},
+    {"listWithSubtitleRowHeight", &ThemeMetrics::listWithSubtitleRowHeight},
+    {"listRowGap", &ThemeMetrics::listRowGap},
+    {"listRowRadius", &ThemeMetrics::listRowRadius},
+    {"listInset", &ThemeMetrics::listInset},
+    {"listSidePadding", &ThemeMetrics::listSidePadding},
+    {"listScrollWidth", &ThemeMetrics::listScrollWidth},
+    {"headerSidePadding", &ThemeMetrics::headerSidePadding},
+    {"headerUnderlineSize", &ThemeMetrics::headerUnderlineSize},
+    {"menuRowHeight", &ThemeMetrics::menuRowHeight},
+    {"menuSpacing", &ThemeMetrics::menuSpacing},
+    {"tabSpacing", &ThemeMetrics::tabSpacing},
+    {"tabBarHeight", &ThemeMetrics::tabBarHeight},
+    {"scrollBarWidth", &ThemeMetrics::scrollBarWidth},
+    {"scrollBarRightOffset", &ThemeMetrics::scrollBarRightOffset},
+    {"homeTopPadding", &ThemeMetrics::homeTopPadding},
+    {"homeCoverHeight", &ThemeMetrics::homeCoverHeight},
+    {"homeCoverTileHeight", &ThemeMetrics::homeCoverTileHeight},
+    {"homeMenuTopOffset", &ThemeMetrics::homeMenuTopOffset},
+    {"buttonHintsHeight", &ThemeMetrics::buttonHintsHeight},
+    {"sideButtonHintsWidth", &ThemeMetrics::sideButtonHintsWidth},
+    {"progressBarHeight", &ThemeMetrics::progressBarHeight},
+    {"progressBarMarginTop", &ThemeMetrics::progressBarMarginTop},
+    {"statusBarHorizontalMargin", &ThemeMetrics::statusBarHorizontalMargin},
+    {"statusBarVerticalMargin", &ThemeMetrics::statusBarVerticalMargin},
+    {"keyboardKeyHeight", &ThemeMetrics::keyboardKeyHeight},
+    {"keyboardKeySpacing", &ThemeMetrics::keyboardKeySpacing},
+    {"keyboardVerticalOffset", &ThemeMetrics::keyboardVerticalOffset},
+    {"popupMarginX", &ThemeMetrics::popupMarginX},
+    {"popupMarginY", &ThemeMetrics::popupMarginY},
+    {"popupFrameThickness", &ThemeMetrics::popupFrameThickness},
+    {"popupCornerRadius", &ThemeMetrics::popupCornerRadius},
+    {"popupTextBaselineOffsetY", &ThemeMetrics::popupTextBaselineOffsetY},
+    {"popupProgressBarHeight", &ThemeMetrics::popupProgressBarHeight},
+    {"optionPopupItemSpacing", &ThemeMetrics::optionPopupItemSpacing},
+    {"optionPopupInnerPadding", &ThemeMetrics::optionPopupInnerPadding},
+    {"optionPopupSelectionVPadding", &ThemeMetrics::optionPopupSelectionVPadding},
+    {"optionPopupDialogSideMargin", &ThemeMetrics::optionPopupDialogSideMargin},
+    {"textFieldHorizontalPadding", &ThemeMetrics::textFieldHorizontalPadding},
+    {"textFieldNormalThickness", &ThemeMetrics::textFieldNormalThickness},
+    {"textFieldCursorThickness", &ThemeMetrics::textFieldCursorThickness},
+    {"textFieldLineEndOffset", &ThemeMetrics::textFieldLineEndOffset},
+    {"controlRadius", &ThemeMetrics::controlRadius},
+    {"sheetRadius", &ThemeMetrics::sheetRadius},
+    {"capsuleRadius", &ThemeMetrics::capsuleRadius},
+};
+}  // namespace
+
+bool UITheme::setMetric(const char* name, const int value) {
+  getMetrics();  // make sure the live copy exists before patching it
+  for (const auto& f : kMetricFields) {
+    if (strcmp(f.name, name) == 0) {
+      adjustedMetrics.*(f.field) = value;
+      return true;
+    }
+  }
+  return false;
+}
+
+void UITheme::printMetrics(Print& out) const {
+  const ThemeMetrics& m = getMetrics();
+  for (const auto& f : kMetricFields) out.printf("%s=%d\n", f.name, m.*(f.field));
 }
 
 // Screen area excluding the button hints
