@@ -1091,13 +1091,20 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                   if (displayHeight < 1) displayHeight = 1;
                   LOG_DBG("EHP", "Display size from CSS width: %dx%d", displayWidth, displayHeight);
                 } else {
-                  // Scale to fit container while maintaining aspect ratio
+                  // Scale to fit container while maintaining aspect ratio. Pictures
+                  // (300 px or more each way -- covers, plates, figures) may also
+                  // scale UP to fit: a cover sized for a 480x800 phone-class page is
+                  // a 5 cm stamp on a 1404x1872 one. Smaller images (icons, drop
+                  // caps, ornaments) keep their native size. The pixel cache is
+                  // built at display size, so an upscaled image is decoded and
+                  // dithered at that size rather than stretched afterwards.
                   int maxWidth = containerWidth;
                   int maxHeight = self->viewportHeight;
-                  float scaleX = (dims.width > maxWidth) ? (float)maxWidth / dims.width : 1.0f;
-                  float scaleY = (dims.height > maxHeight) ? (float)maxHeight / dims.height : 1.0f;
+                  const bool picture = dims.width >= 300 && dims.height >= 300;
+                  float scaleX = (dims.width > maxWidth || picture) ? (float)maxWidth / dims.width : 1.0f;
+                  float scaleY = (dims.height > maxHeight || picture) ? (float)maxHeight / dims.height : 1.0f;
                   float scale = (scaleX < scaleY) ? scaleX : scaleY;
-                  if (scale > 1.0f) scale = 1.0f;
+                  if (scale > 1.0f && !picture) scale = 1.0f;
 
                   displayWidth = (int)(dims.width * scale);
                   displayHeight = (int)(dims.height * scale);

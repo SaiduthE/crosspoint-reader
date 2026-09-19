@@ -1537,12 +1537,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto grayscale = renderer.grayscaleCapabilities(absoluteImageGrayscale ? HalDisplay::GrayscaleMode::Absolute
                                                                                : HalDisplay::GrayscaleMode::Overlay);
   const bool tiledGrayscale = needsAnyGrayscale && grayscale.stripUploads;
-  // Paper Mono only (no other panel combines): defer the B/W base activation so
-  // the gray planes join it in a single waveform. Displaying the base
-  // separately makes the gray pass re-drive the whole text body — a visible
-  // flash on every AA page.
-  const bool combinedGrayscaleBase =
-      tiledGrayscale && !pageHasImages && grayscale.base == HalDisplay::GrayscaleBase::Combined;
+  // Paper Mono and the IT8951: defer the B/W base activation so the gray
+  // planes join it in a single waveform. Displaying the base separately makes
+  // the gray pass re-drive the whole text body — a visible flash on every AA
+  // page. Paper Mono keeps image pages on the separate-base path; the IT8951
+  // takes a whole 4bpp frame per load, so an image page combines exactly like
+  // a text page and the separate base would only cost a second 1.2 s refresh
+  // (measured on e-Minimal: 3.6 s per image page instead of 2.4).
+  const bool combinesImagePages = display.getController() == HalDisplay::Controller::IT8951;
+  const bool combinedGrayscaleBase = tiledGrayscale && (!pageHasImages || combinesImagePages) &&
+                                     grayscale.base == HalDisplay::GrayscaleBase::Combined;
   const bool overlapRefresh = tiledGrayscale && grayscale.asyncBase && !pageHasImages;
   auto renderGrayscalePass = [&]() {
     if (absoluteImageGrayscale || needsTextGrayscale) {
@@ -1573,16 +1577,21 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     }
     LOG_DBG("ERS", "UC8279 image page: absolute quality waveform");
     pagesUntilFullRefresh = 1;
+  } else if (combinedGrayscaleBase) {
+    // Stash the base without activating; displayGrayBuffer() below commits
+    // base + grays as one waveform.
+    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    // A dithered picture driven differentially leaves the heaviest residue of
+    // anything the reader shows; like the separate-base path below, make the
+    // next page a clean refresh (seen as text ghosting after every cover on
+    // the e-Minimal 7.8" once image pages joined this path).
+    if (pageHasImages) pagesUntilFullRefresh = 1;
   } else if (pageHasImages) {
     // Image pages use one base refresh before the grayscale pass. FAST leaves
     // the panel receptive to the gray waveform; pending cleanup still honors
     // the scheduled/manual HALF refresh.
     renderer.displayBuffer(cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
     pagesUntilFullRefresh = 1;
-  } else if (combinedGrayscaleBase) {
-    // Stash the base without activating; displayGrayBuffer() below commits
-    // base + grays as one waveform.
-    ReaderUtils::displayBaseWithRefreshCycle(renderer, pagesUntilFullRefresh);
   } else if (needsAnyGrayscale) {
     if (pagesUntilFullRefresh <= 1) {
       // A cleanup refresh settles X3 correctly only when its grayscale
@@ -1602,8 +1611,14 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto tDisplay = millis();
 
   if (tiledGrayscale) {
-    constexpr int STRIP_ROWS = 80;
+    // Each strip re-walks the page with clipping, so the plane passes cost per
+    // strip, not per row: on the e-Minimal 7.8" (1872x1404) 80-row strips made
+    // each AA plane ~2x the B/W render, and a full-page picture was walked
+    // seven times (B/W + 3 strips x 2 planes, ~0.6 s each). With 8 MB of PSRAM
+    // the whole frame is one strip: the 329 KB scratch lands in PSRAM
+    // (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL is 4 KB) and each plane is one pass.
     const int gh = renderer.getDisplayHeight();
+    const int STRIP_ROWS = display.getController() == HalDisplay::Controller::IT8951 ? gh : 80;
     const int gwBytes = renderer.getDisplayWidthBytes();
     const size_t planeBytes = static_cast<size_t>(gwBytes) * gh;
 
