@@ -205,15 +205,30 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
   const int pageHeight = renderer.getScreenHeight();
-  constexpr int buttonWidth = 106;
-  constexpr int buttonHeight = BaseMetrics::values.buttonHintsHeight;
-  constexpr int buttonY = BaseMetrics::values.buttonHintsHeight;  // Distance from bottom
-  constexpr int textYOffset = 7;                                  // Distance from top of button to text baseline
+  const int pageWidth = renderer.getScreenWidth();
+  // Sizes from the live metrics (uiScale-adjusted on boards with a larger font
+  // tier), not the constexpr table.
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const float scale = static_cast<float>(metrics.buttonHintsHeight) / BaseMetrics::values.buttonHintsHeight;
+  const int buttonWidth = static_cast<int>(106 * scale);
+  const int buttonHeight = metrics.buttonHintsHeight;
+  const int buttonY = metrics.buttonHintsHeight;         // Distance from bottom
+  const int textYOffset = static_cast<int>(7 * scale);  // Distance from top of button to text baseline
   // Keyed to the portrait panel width: the 528-wide X3 gets more spacing than
-  // the 480-wide boards (X4, X4 Pro, and the other 800x480 panels).
+  // the 480-wide boards (X4, X4 Pro, and the other 800x480 panels). Wider
+  // panels (e-Minimal 7.8") spread the four hints evenly, centred per quarter.
   constexpr int narrowButtonPositions[] = {25, 130, 245, 350};
   constexpr int wideButtonPositions[] = {38, 154, 268, 384};
-  const int* buttonPositions = renderer.getScreenWidth() >= 528 ? wideButtonPositions : narrowButtonPositions;
+  int spreadButtonPositions[4];
+  const int* buttonPositions;
+  if (pageWidth <= 528) {
+    buttonPositions = pageWidth >= 528 ? wideButtonPositions : narrowButtonPositions;
+  } else {
+    const int margin = static_cast<int>(20 * scale);
+    const int slot = (pageWidth - 2 * margin) / 4;
+    for (int i = 0; i < 4; i++) spreadButtonPositions[i] = margin + i * slot + (slot - buttonWidth) / 2;
+    buttonPositions = spreadButtonPositions;
+  }
   const char* labels[] = {btn1, btn2, btn3, btn4};
   const bool grayscale = renderer.getRenderMode() != GfxRenderer::BW && !renderer.grayPlanesAreAbsolute();
 
