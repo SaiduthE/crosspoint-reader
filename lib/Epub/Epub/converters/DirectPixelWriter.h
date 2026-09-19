@@ -177,7 +177,9 @@ struct DirectPixelWriter {
     const int sy = phyY - originY;
     if (static_cast<unsigned>(sy) >= static_cast<unsigned>(clipRows)) return;
 
-    const uint16_t byteIndex = static_cast<uint16_t>(sy * displayWidthBytes + (phyX >> 3));
+    // 32-bit: a 1872x1404 frame is 328 KB, and a 16-bit index wrapped every
+    // image pixel below row 280 to the top of the frame (e-Minimal, 2026-09-18).
+    const uint32_t byteIndex = static_cast<uint32_t>(sy) * displayWidthBytes + static_cast<uint32_t>(phyX >> 3);
     const uint8_t bitMask = 1 << (7 - (phyX & 7));
 
     if (state) {
