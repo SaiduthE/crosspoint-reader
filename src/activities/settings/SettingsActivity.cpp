@@ -249,7 +249,7 @@ void SettingsActivity::stepTab(const int direction) {
 bool SettingsActivity::handleButtons() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (ringPos() == 0) {
-      stepTab(1);
+      enterList();  // Up/Down choose the tab; Confirm opens it
     } else {
       toggleCurrentSetting();
       requestUpdate();
@@ -585,8 +585,9 @@ void SettingsActivity::drawChrome() {
 
 void SettingsActivity::drawFooter() {
   const int ring = ringPos();
+  // On the tab band Confirm opens the highlighted tab (Up/Down choose it).
   const auto confirmLabel =
-      (ring == 0) ? I18N.get(categoryNames[(selectedCategoryIndex + 1) % categoryCount])
+      (ring == 0) ? tr(STR_OPEN)
                   : (ring > 0 && (*currentSettings)[ring - 1].nameId == StrId::STR_TIME_TO_SLEEP ? tr(STR_SELECT)
                                                                                                  : tr(STR_TOGGLE));
 

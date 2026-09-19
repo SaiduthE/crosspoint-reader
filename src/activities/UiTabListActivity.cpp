@@ -60,13 +60,35 @@ void UiTabListActivity::moveRingTo(const int ringIndex) {
 }
 
 void UiTabListActivity::navigateButtons() {
-  // Buttons walk the tab band (index 0) plus the rows (1..listCount).
+  // Two levels, one pair of buttons: with the tab band focused (ring 0) Up/Down
+  // move between tabs and Confirm drops into the list; inside the list they
+  // walk the rows (wrapping through the band, so Up from the first row lands on
+  // the tabs) and Back (subclass) returns to the band. Replaces the original
+  // "Confirm cycles the tabs" scheme, which read as a stuck Select on a
+  // four-button device. A hold repeats the same step.
   const int ringSize = listCount() + 1;
-  buttonNavigator.onNextRelease([this, ringSize] { moveRingTo(ButtonNavigator::nextIndex(ringPos(), ringSize)); });
-  buttonNavigator.onPreviousRelease(
-      [this, ringSize] { moveRingTo(ButtonNavigator::previousIndex(ringPos(), ringSize)); });
-  buttonNavigator.onNextContinuous([this] { stepTab(1); });
-  buttonNavigator.onPreviousContinuous([this] { stepTab(-1); });
+  const auto next = [this, ringSize] {
+    if (ringPos() == 0) {
+      stepTab(1);
+    } else {
+      moveRingTo(ButtonNavigator::nextIndex(ringPos(), ringSize));
+    }
+  };
+  const auto previous = [this, ringSize] {
+    if (ringPos() == 0) {
+      stepTab(-1);
+    } else {
+      moveRingTo(ButtonNavigator::previousIndex(ringPos(), ringSize));
+    }
+  };
+  buttonNavigator.onNextRelease(next);
+  buttonNavigator.onPreviousRelease(previous);
+  buttonNavigator.onNextContinuous(next);
+  buttonNavigator.onPreviousContinuous(previous);
+}
+
+void UiTabListActivity::enterList() {
+  if (listCount() > 0) moveRingTo(1);
 }
 
 void UiTabListActivity::syncTabListViewport(UiScreen& screen, fui::ListProps& props) {

@@ -9,9 +9,11 @@
 // the list rows, so props.selectedIndex = ring - 1 (-1 = tab band focused).
 // Each tab owns its own ListNav (selection + viewport memory); activeNav()
 // redirects the whole UiListActivity protocol (touch routing, swipe scroll,
-// screen sync) to the active tab's state. Button navigation walks the ring on
-// release and steps the TAB on continuous hold. The tab-bar chrome (pill
-// styles, focused band wash) is shared verbatim via buildTabBar().
+// screen sync) to the active tab's state. Buttons work on two levels: on the
+// tab band Up/Down move between tabs and Confirm (enterList) drops into the
+// rows; in the rows Up/Down walk the ring and Back (subclass) returns to the
+// band. The tab-bar chrome (pill styles, focused band wash) is shared verbatim
+// via buildTabBar().
 //
 // Subclasses own the button semantics wholesale (handleButtons is pure here:
 // the two existing tab screens differ on press-vs-release and what Back does)
@@ -54,6 +56,8 @@ class UiTabListActivity : public UiListActivity {
   // Move to a ring position: tab bar rewinds the viewport, a row pulls the
   // viewport to itself.
   void moveRingTo(int ringIndex);
+  // Confirm on the tab band: focus the first row of the active tab.
+  void enterList();
 
   // --- screen helpers --------------------------------------------------------
   // The shared tab band: theme-driven pill treatment (label-hugging Lyra vs
