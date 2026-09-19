@@ -227,7 +227,15 @@ bool HalGPIO::verifyPowerButtonWakeup() {
   // wheel click, so a click wake is always released before this samples and
   // verification would re-sleep on every wake. Its wheel has hard external
   // pull-ups, so the ghost-wake debounce this implements is not needed.
-  if (BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() || BoardConfig::ACTIVE.input.power < 0) {
+  // eMinimal 7.8: same latency problem (S3 with 16 MB flash and 8 MB octal PSRAM
+  // to bring up before setup(); measured 350 ms to this sample, a tap is long
+  // gone), and the SDK now pulls the wake pin in the RTC domain, so there is no
+  // floating-pin ghost wake to debounce. The device design has no power button
+  // at all — sleep is a long-press on Back — so a pocket-press guard is not
+  // wanted either. Without this exemption every tap wake re-slept before the
+  // display was touched, invisibly.
+  if (BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() || BoardConfig::isEMinimal78() ||
+      BoardConfig::ACTIVE.input.power < 0) {
     return true;
   }
 
