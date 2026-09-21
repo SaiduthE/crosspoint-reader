@@ -1,313 +1,46 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Settings - CrossPoint Reader</title>
-  <style>
-    :root {
-      --font-color: #333;
-      --bg: #f5f5f5;
-      --title-color: #2c3e50;
-      --card-bg: #FFF;
-      --label-color: #7f8c8d;
-      --border-color: #eee;
-      --accent-color: rgb(110, 154, 130);
-      --accent-hover-color: #5a8c73;
-      --toggle-bg: #ccc;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --font-color: #f5f5f5;
-        --bg: #333;
-        --title-color: #ecf0f1;
-        --card-bg: #444;
-        --label-color: #bdc3c7;
-        --border-color: #555;
-        --toggle-bg: #666;
-        color-scheme: dark;
-      }
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        Oxygen, Ubuntu, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: var(--bg);
-      color: var(--font-color);
-    }
-    h1 {
-      color: var(--title-color);
-      border-bottom: 2px solid var(--accent-color);
-      padding-bottom: 10px;
-    }
-    h2 {
-      color: var(--title-color);
-      margin-top: 0;
-    }
-    .card {
-      background: var(--card-bg);
-      border-radius: 8px;
-      padding: 20px;
-      margin: 15px 0;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    .nav-links {
-      margin: 20px 0;
-      display: flex;
-      gap: 10px;
-    }
-    .nav-links a {
-      padding: 10px 20px;
-      color: var(--font-color);
-      text-decoration: none;
-      border-radius: 4px;
-    }
-    .nav-links a.active {
-      background-color: var(--accent-color);
-      color: white;
-    }
-    .nav-links a:not(.active):hover {
-      background-color: var(--accent-hover-color);
-      color: white;
-    }
-    .setting-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-    .setting-row:last-child {
-      border-bottom: none;
-    }
-    .setting-name {
-      font-weight: 500;
-      color: var(--label-color);
-      flex: 1;
-      min-width: 0;
-      padding-right: 12px;
-    }
-    .setting-control {
-      flex-shrink: 0;
-    }
-    .setting-control select,
-    .setting-control input[type="number"],
-    .setting-control input[type="text"],
-    .setting-control input[type="password"] {
-      padding: 6px 10px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 0.95em;
-      background: var(--card-bg);
-    }
-    .setting-control select {
-      min-width: 160px;
-    }
-    .setting-control input[type="text"],
-    .setting-control input[type="password"] {
-      width: 220px;
-    }
-    .setting-control input[type="number"] {
-      width: 80px;
-    }
-    /* Toggle switch */
-    .toggle-switch {
-      display: inline-block;
-      position: relative;
-      width: 48px;
-      height: 26px;
-    }
-    .toggle-switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    .toggle-slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: var(--toggle-bg);
-      border-radius: 26px;
-      transition: 0.3s;
-    }
-    .toggle-slider:before {
-      position: absolute;
-      content: "";
-      height: 20px;
-      width: 20px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
-      border-radius: 50%;
-      transition: 0.3s;
-    }
-    .toggle-switch input:checked + .toggle-slider {
-      background-color: var(--accent-color);
-    }
-    .toggle-switch input:checked + .toggle-slider:before {
-      transform: translateX(22px);
-    }
-    .save-container {
-      text-align: center;
-      margin: 20px 0;
-    }
-    .save-btn {
-      background-color: #27ae60;
-      color: white;
-      padding: 12px 40px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 1.1em;
-      font-weight: 600;
-    }
-    .save-btn:hover {
-      background-color: #219a52;
-    }
-    .save-btn:disabled {
-      background-color: #95a5a6;
-      cursor: not-allowed;
-    }
-    .message {
-      padding: 12px;
-      border-radius: 4px;
-      margin: 15px 0;
-      text-align: center;
-      display: none;
-    }
-    .message.success {
-      background-color: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-    }
-    .message.error {
-      background-color: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-    }
-    .loader-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      margin: 20px 0;
-    }
-    .loader {
-      width: 48px;
-      height: 48px;
-      border: 5px solid #AAA;
-      border-bottom-color: transparent;
-      border-radius: 50%;
-      display: inline-block;
-      box-sizing: border-box;
-      animation: rotation 1s linear infinite;
-    }
-    @keyframes rotation {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-    .opds-server {
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      padding: 12px;
-      margin: 10px 0;
-    }
-    .opds-server .setting-row:last-child {
-      border-bottom: none;
-    }
-    .opds-actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .btn-small {
-      padding: 6px 14px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.9em;
-    }
-    .btn-add {
-      background-color: var(--accent-color);
-      color: white;
-    }
-    .btn-add:hover {
-      background-color: var(--accent-hover-color);
-    }
-    .btn-delete {
-      background-color: #e74c3c;
-      color: white;
-    }
-    .btn-delete:hover {
-      background-color: #c0392b;
-    }
-    .btn-save-server {
-      background-color: #27ae60;
-      color: white;
-    }
-    .btn-save-server:hover {
-      background-color: #219a52;
-    }
-    @media (max-width: 600px) {
-      body {
-        padding: 10px;
-        font-size: 14px;
-      }
-      .card {
-        padding: 12px;
-        margin: 10px 0;
-      }
-      h1 {
-        font-size: 1.3em;
-      }
-      .nav-links a {
-        padding: 8px 12px;
-        font-size: 0.9em;
-      }
-      .setting-row {
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-      .setting-control select,
-      .setting-control input[type="text"],
-      .setting-control input[type="password"] {
-        min-width: 0;
-        width: unset;
-      }
-    }
-  </style>
-</head>
-<body>
-  <h1>📚 CrossPoint Reader</h1>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Settings – e-Minimal</title>
+    <link rel="stylesheet" href="/css/app.css" />
+    <script src="/js/app.js" defer></script>
+    <style>
+      /* Settings-specific; everything else comes from /css/app.css */
+      body[data-page="settings"] .section-layout.no-nav { grid-template-columns: minmax(0, 1fr); }
+      body[data-page="settings"] .no-nav .section-nav { display: none; }
+      body[data-page="settings"] .card[id^="section-"] { scroll-margin-top: calc(var(--topbar-h) + 16px); }
+      body[data-page="settings"] .entry + .entry { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule); }
+      body[data-page="settings"] .row.actions { justify-content: flex-end; gap: 8px; }
+      body[data-page="settings"] .add-row { padding-top: 12px; }
+    </style>
+  </head>
+  <body data-page="settings" data-title="Settings">
+    <main>
+      <div class="section-layout no-nav">
+        <nav class="section-nav" aria-label="Sections">
+          <div class="section-links" id="section-links"></div>
+          <div class="field section-select">
+            <label for="sectionSelect">Section</label>
+            <select id="sectionSelect"></select>
+          </div>
+        </nav>
+        <div>
+          <div id="settings-container">
+            <p class="empty"><span class="spinner" aria-hidden="true"></span> Loading settings…</p>
+          </div>
+          <div id="wifi-container"></div>
+          <div id="opds-container"></div>
+        </div>
+      </div>
 
-  <div class="nav-links">
-    <a href="/">Home</a>
-    <a href="/files">File Manager</a>
-    <a href="/settings" class="active">Settings</a>
-    <a href="/fonts">Fonts</a>
-  </div>
-
-  <div id="message" class="message"></div>
-
-  <div id="settings-container">
-    <div class="loader-container">
-      <span class="loader"></span>
-    </div>
-  </div>
-
-  <div class="save-container" id="save-container" style="display:none;">
-    <button class="save-btn" id="saveBtn" onclick="saveSettings()">Save Settings</button>
-  </div>
-
-  <div id="wifi-container"></div>
-  <div id="opds-container"></div>
-
-  <div class="card">
-    <p style="text-align: center; color: #95a5a6; margin: 0;">
-      CrossPoint E-Reader • Open Source
-    </p>
-  </div>
+      <div class="savebar" id="save-container">
+        <span id="save-summary"></span>
+        <button class="btn btn-primary" id="saveBtn" onclick="saveSettings()">Save changes</button>
+      </div>
+    </main>
 
 <script>
   let allSettings = [];
@@ -328,11 +61,7 @@
   }
 
   function showMessage(text, isError) {
-    const msg = document.getElementById('message');
-    msg.textContent = text;
-    msg.className = 'message ' + (isError ? 'error' : 'success');
-    msg.style.display = 'block';
-    setTimeout(function() { msg.style.display = 'none'; }, 4000);
+    ui.toast(text, isError ? 'danger' : 'ok');
   }
 
   function renderControl(setting) {
@@ -340,32 +69,32 @@
 
     if (setting.type === 'toggle') {
       const checked = setting.value ? 'checked' : '';
-      return '<label class="toggle-switch">' +
+      return '<label class="toggle" aria-label="' + escapeHtml(setting.name) + '">' +
         '<input type="checkbox" id="' + id + '" ' + checked + ' onchange="handleSettingChanged(\'' + setting.key + '\')">' +
-        '<span class="toggle-slider"></span></label>';
+        '<span></span></label>';
     }
 
     if (setting.type === 'enum') {
-      let html = '<select id="' + id + '" onchange="handleSettingChanged(\'' + setting.key + '\')">';
+      let html = '<span class="row-control"><select id="' + id + '" onchange="handleSettingChanged(\'' + setting.key + '\')">';
       setting.options.forEach(function(opt, idx) {
         const selected = idx === setting.value ? ' selected' : '';
         html += '<option value="' + idx + '"' + selected + '>' + escapeHtml(opt) + '</option>';
       });
-      html += '</select>';
+      html += '</select></span>';
       return html;
     }
 
     if (setting.type === 'value') {
-      return '<input type="number" id="' + id + '" value="' + setting.value + '"' +
+      return '<span class="row-control"><input type="number" id="' + id + '" value="' + setting.value + '"' +
         ' min="' + setting.min + '" max="' + setting.max + '" step="' + setting.step + '"' +
-        ' onchange="handleSettingChanged(\'' + setting.key + '\')">';
+        ' onchange="handleSettingChanged(\'' + setting.key + '\')"></span>';
     }
 
     if (setting.type === 'string') {
       const inputType = setting.name.toLowerCase().includes('password') ? 'password' : 'text';
       const val = setting.value || '';
-      return '<input type="' + inputType + '" id="' + id + '" value="' + escapeHtml(val) + '"' +
-        ' oninput="handleSettingChanged(\'' + setting.key + '\')">';
+      return '<span class="row-control"><input type="' + inputType + '" id="' + id + '" value="' + escapeHtml(val) + '"' +
+        ' oninput="handleSettingChanged(\'' + setting.key + '\')"></span>';
     }
 
     return '';
@@ -390,8 +119,20 @@
     return undefined;
   }
 
+  // The save bar shows only while something differs from what was loaded.
+  function updateSaveBar() {
+    let count = 0;
+    allSettings.forEach(function(s) {
+      const current = getValue(s);
+      if (current !== undefined && current !== originalValues[s.key]) count++;
+    });
+    document.getElementById('save-summary').textContent = count + (count === 1 ? ' change' : ' changes');
+    document.getElementById('save-container').classList.toggle('show', count > 0);
+  }
+
   function markChanged() {
     document.getElementById('saveBtn').disabled = false;
+    updateSaveBar();
   }
 
   function findSetting(key) {
@@ -499,6 +240,70 @@
     markChanged();
   }
 
+  // --- Section nav ---
+  // Links on laptops, a select on phones, both built from the rendered sections.
+  // The active link follows scrolling; a tap pins it until the next user input.
+  let pinnedSection = null;
+
+  function slugify(name, fallback) {
+    const s = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return s || String(fallback);
+  }
+
+  function renderSectionNav(sections) {
+    document.getElementById('section-links').innerHTML = sections.map(function(s) {
+      return '<a href="#' + s.id + '">' + escapeHtml(s.name) + '</a>';
+    }).join('');
+    document.getElementById('sectionSelect').innerHTML = sections.map(function(s) {
+      return '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>';
+    }).join('');
+    document.querySelector('.section-layout').classList.toggle('no-nav', sections.length === 0);
+    updateActiveSection();
+  }
+
+  function updateActiveSection() {
+    const links = document.querySelectorAll('#section-links a');
+    if (!links.length) return;
+    let current = pinnedSection;
+    if (!current) {
+      // Last section whose heading has reached the band under the topbar; at the
+      // very bottom the final section counts even if it never gets that high.
+      const atBottom = window.scrollY > 0 &&
+        window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      links.forEach(function(a) {
+        const id = a.getAttribute('href').slice(1);
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (!current || atBottom || el.getBoundingClientRect().top <= 120) current = id;
+      });
+    }
+    links.forEach(function(a) {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+    });
+    const select = document.getElementById('sectionSelect');
+    if (current && select.value !== current) select.value = current;
+  }
+
+  function pinSection(id) {
+    pinnedSection = id;
+    updateActiveSection();
+  }
+
+  document.getElementById('section-links').addEventListener('click', function(e) {
+    const a = e.target.closest('a');
+    if (a) pinSection(a.getAttribute('href').slice(1));
+  });
+  document.getElementById('sectionSelect').addEventListener('change', function() {
+    const el = document.getElementById(this.value);
+    if (!el) return;
+    pinSection(this.value);
+    el.scrollIntoView();
+  });
+  ['wheel', 'touchstart', 'mousedown', 'keydown'].forEach(function(type) {
+    window.addEventListener(type, function() { pinnedSection = null; }, { passive: true });
+  });
+  window.addEventListener('scroll', updateActiveSection, { passive: true });
+
   async function loadSettings() {
     try {
       const response = await fetch('/api/settings');
@@ -522,21 +327,28 @@
 
       const container = document.getElementById('settings-container');
       let html = '';
+      const sections = [];
 
       for (const category in groups) {
-        html += '<div class="card"><h2>' + escapeHtml(category) + '</h2>';
+        const id = 'section-' + slugify(category, sections.length);
+        sections.push({ id: id, name: category });
+        html += '<section class="card" id="' + id + '"><h2>' + escapeHtml(category) + '</h2><div class="list">';
         groups[category].forEach(function(s) {
-          html += '<div class="setting-row" id="row-setting-' + s.key + '">' +
-            '<span class="setting-name">' + escapeHtml(s.name) + '</span>' +
-            '<span class="setting-control">' + renderControl(s) + '</span>' +
+          html += '<div class="row" id="row-setting-' + s.key + '">' +
+            '<label class="row-main" for="setting-' + s.key + '">' + escapeHtml(s.name) + '</label>' +
+            renderControl(s) +
             '</div>';
         });
-        html += '</div>';
+        html += '</div></section>';
       }
 
       container.innerHTML = html;
+      renderSectionNav(sections.concat([
+        { id: 'section-wifi', name: 'Wi-Fi networks' },
+        { id: 'section-opds', name: 'OPDS servers' }
+      ]));
       updateSettingsVisibility();
-      document.getElementById('save-container').style.display = '';
+      document.getElementById('save-container').classList.remove('show');
       document.getElementById('saveBtn').disabled = true;
       preserveQuickResumeTimeoutOn = getControlValue('quickResumeSleepScreen') === 1;
       quickResumeTimeoutAutoEnabled = false;
@@ -546,14 +358,14 @@
     } catch (e) {
       console.error(e);
       document.getElementById('settings-container').innerHTML =
-        '<div class="card"><p style="text-align:center;color:#e74c3c;">Failed to load settings</p></div>';
+        '<section class="card"><p class="empty">Could not load settings. Reload the page to try again.</p></section>';
     }
   }
 
   async function saveSettings() {
     const btn = document.getElementById('saveBtn');
     btn.disabled = true;
-    btn.textContent = 'Saving...';
+    btn.textContent = 'Saving…';
 
     // Collect only changed values
     const changes = {};
@@ -565,8 +377,9 @@
     });
 
     if (Object.keys(changes).length === 0) {
-      showMessage('No changes to save.', false);
-      btn.textContent = 'Save Settings';
+      showMessage('No changes to save', false);
+      btn.textContent = 'Save changes';
+      updateSaveBar();
       return;
     }
 
@@ -587,13 +400,14 @@
         originalValues[key] = changes[key];
       }
 
-      showMessage('Settings saved successfully!', false);
+      showMessage('Settings saved', false);
     } catch (e) {
       console.error(e);
-      showMessage('Error: ' + e.message, true);
+      showMessage('Could not save settings: ' + e.message, true);
     }
 
-    btn.textContent = 'Save Settings';
+    btn.textContent = 'Save changes';
+    updateSaveBar();
   }
 
   // --- Wi-Fi Network Management ---
@@ -606,41 +420,41 @@
     const isNew = idx === -1;
     const id = isNew ? 'new' : idx;
     const lastConnected = net.isLastConnected
-      ? '<div style="margin-top:8px;color:var(--label-color);font-size:0.9em;">Last connected network</div>'
+      ? '<span class="row-meta">Last connected</span>'
       : '';
 
-    return '<div class="opds-server" id="wifi-' + id + '">' +
-      '<div class="setting-row">' +
-        '<span class="setting-name">SSID</span>' +
-        '<span class="setting-control"><input type="text" id="wifi-ssid-' + id + '" value="' + escapeHtml(net.ssid || '') + '"></span>' +
+    return '<div class="list entry" id="wifi-' + id + '">' +
+      '<div class="row">' +
+        '<label class="row-main" for="wifi-ssid-' + id + '">Network name' + lastConnected + '</label>' +
+        '<span class="row-control"><input type="text" id="wifi-ssid-' + id + '" value="' + escapeHtml(net.ssid || '') + '"></span>' +
       '</div>' +
-      '<div class="setting-row">' +
-        '<span class="setting-name">Password</span>' +
-        '<span class="setting-control"><input type="password" id="wifi-pass-' + id + '" placeholder="' + (net.hasPassword ? '(unchanged)' : '') + '"></span>' +
+      '<div class="row">' +
+        '<label class="row-main" for="wifi-pass-' + id + '">Password' +
+          (net.hasPassword ? '<span class="row-meta">Saved; leave blank to keep it</span>' : '') + '</label>' +
+        '<span class="row-control"><input type="password" id="wifi-pass-' + id + '"></span>' +
       '</div>' +
-      lastConnected +
-      '<div class="opds-actions">' +
-        '<button class="btn-small btn-save-server" onclick="saveWifiNetwork(' + idx + ')">Save</button>' +
-        (isNew ? '' : '<button class="btn-small btn-delete" onclick="deleteWifiNetwork(' + idx + ')">Delete</button>') +
+      '<div class="row actions">' +
+        '<button class="btn btn-sm" onclick="saveWifiNetwork(' + idx + ')">Save</button>' +
+        (isNew ? '' : '<button class="btn btn-danger btn-sm" onclick="deleteWifiNetwork(' + idx + ')">Forget</button>') +
       '</div>' +
     '</div>';
   }
 
   function renderWifiSection() {
     const container = document.getElementById('wifi-container');
-    let html = '<div class="card"><h2>Wi-Fi Networks</h2>';
+    let html = '<section class="card" id="section-wifi"><h2>Wi-Fi networks</h2>';
 
     if (wifiNetworks.length === 0) {
-      html += '<p style="color:var(--label-color);text-align:center;">No Wi-Fi networks saved</p>';
+      html += '<p class="empty">No networks saved yet. Add one for the reader to join.</p>';
     } else {
       wifiNetworks.forEach(function(net, idx) {
         html += renderWifiNetwork(net, idx);
       });
     }
 
-    html += '<div style="margin-top:12px;text-align:center;">' +
-      '<button class="btn-small btn-add" onclick="addWifiNetwork()">+ Add Network</button>' +
-    '</div></div>';
+    html += '<div class="add-row">' +
+      '<button class="btn btn-add" onclick="addWifiNetwork()">Add network</button>' +
+    '</div></section>';
     container.innerHTML = html;
   }
 
@@ -668,7 +482,7 @@
     const id = idx === -1 ? 'new' : idx;
     const ssid = document.getElementById('wifi-ssid-' + id).value.trim();
     if (!ssid) {
-      showMessage('SSID is required.', true);
+      showMessage('Enter the network name first', true);
       return;
     }
 
@@ -686,15 +500,16 @@
         body: JSON.stringify(data)
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('Wi-Fi network saved!', false);
+      showMessage('Network saved', false);
       await loadWifiNetworks();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showMessage('Could not save network: ' + e.message, true);
     }
   }
 
   async function deleteWifiNetwork(idx) {
-    if (!confirm('Delete this Wi-Fi network?')) return;
+    const name = wifiNetworks[idx] && wifiNetworks[idx].ssid;
+    if (!(await ui.confirm('Forget ' + (name || 'this network') + '?', { ok: 'Forget network', danger: true }))) return;
     try {
       const resp = await fetch('/api/wifi/delete', {
         method: 'POST',
@@ -702,61 +517,62 @@
         body: JSON.stringify({index: idx})
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('Wi-Fi network deleted', false);
+      showMessage('Network forgotten', false);
       await loadWifiNetworks();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showMessage('Could not forget network: ' + e.message, true);
     }
   }
 
   // --- OPDS Server Management ---
   // Dynamically renders an editable list of OPDS servers, communicating with the
   // /api/opds REST endpoints. Password fields are never pre-filled for security;
-  // the "(unchanged)" placeholder indicates an existing password is preserved on save.
+  // a blank password on save keeps the existing one.
   let opdsServers = [];
 
   function renderOpdsServer(srv, idx) {
     const isNew = idx === -1;
     const id = isNew ? 'new' : idx;
-    return '<div class="opds-server" id="opds-' + id + '">' +
-      '<div class="setting-row">' +
-        '<span class="setting-name">Server Name</span>' +
-        '<span class="setting-control"><input type="text" id="opds-name-' + id + '" value="' + escapeHtml(srv.name || '') + '"></span>' +
+    return '<div class="list entry" id="opds-' + id + '">' +
+      '<div class="row">' +
+        '<label class="row-main" for="opds-name-' + id + '">Name</label>' +
+        '<span class="row-control"><input type="text" id="opds-name-' + id + '" value="' + escapeHtml(srv.name || '') + '"></span>' +
       '</div>' +
-      '<div class="setting-row">' +
-        '<span class="setting-name">URL</span>' +
-        '<span class="setting-control"><input type="text" id="opds-url-' + id + '" value="' + escapeHtml(srv.url || '') + '"></span>' +
+      '<div class="row">' +
+        '<label class="row-main" for="opds-url-' + id + '">URL</label>' +
+        '<span class="row-control"><input type="text" id="opds-url-' + id + '" value="' + escapeHtml(srv.url || '') + '"></span>' +
       '</div>' +
-      '<div class="setting-row">' +
-        '<span class="setting-name">Username</span>' +
-        '<span class="setting-control"><input type="text" id="opds-user-' + id + '" value="' + escapeHtml(srv.username || '') + '"></span>' +
+      '<div class="row">' +
+        '<label class="row-main" for="opds-user-' + id + '">Username</label>' +
+        '<span class="row-control"><input type="text" id="opds-user-' + id + '" value="' + escapeHtml(srv.username || '') + '"></span>' +
       '</div>' +
-      '<div class="setting-row">' +
-        '<span class="setting-name">Password</span>' +
-        '<span class="setting-control"><input type="password" id="opds-pass-' + id + '" placeholder="' + (srv.hasPassword ? '(unchanged)' : '') + '"></span>' +
+      '<div class="row">' +
+        '<label class="row-main" for="opds-pass-' + id + '">Password' +
+          (srv.hasPassword ? '<span class="row-meta">Saved; leave blank to keep it</span>' : '') + '</label>' +
+        '<span class="row-control"><input type="password" id="opds-pass-' + id + '"></span>' +
       '</div>' +
-      '<div class="opds-actions">' +
-        '<button class="btn-small btn-save-server" onclick="saveOpdsServer(' + idx + ')">Save</button>' +
-        (isNew ? '' : '<button class="btn-small btn-delete" onclick="deleteOpdsServer(' + idx + ')">Delete</button>') +
+      '<div class="row actions">' +
+        '<button class="btn btn-sm" onclick="saveOpdsServer(' + idx + ')">Save</button>' +
+        (isNew ? '' : '<button class="btn btn-danger btn-sm" onclick="deleteOpdsServer(' + idx + ')">Remove</button>') +
       '</div>' +
     '</div>';
   }
 
   function renderOpdsSection() {
     const container = document.getElementById('opds-container');
-    let html = '<div class="card"><h2>OPDS Servers</h2>';
+    let html = '<section class="card" id="section-opds"><h2>OPDS servers</h2>';
 
     if (opdsServers.length === 0) {
-      html += '<p style="color:var(--label-color);text-align:center;">No OPDS servers configured</p>';
+      html += '<p class="empty">No OPDS servers yet. Add one to browse its catalogue from the reader.</p>';
     } else {
       opdsServers.forEach(function(srv, idx) {
         html += renderOpdsServer(srv, idx);
       });
     }
 
-    html += '<div style="margin-top:12px;text-align:center;">' +
-      '<button class="btn-small btn-add" onclick="addOpdsServer()">+ Add Server</button>' +
-    '</div></div>';
+    html += '<div class="add-row">' +
+      '<button class="btn btn-add" onclick="addOpdsServer()">Add server</button>' +
+    '</div></section>';
     container.innerHTML = html;
   }
 
@@ -800,15 +616,16 @@
         body: JSON.stringify(data)
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('OPDS server saved!', false);
+      showMessage('Server saved', false);
       await loadOpdsServers();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showMessage('Could not save server: ' + e.message, true);
     }
   }
 
   async function deleteOpdsServer(idx) {
-    if (!confirm('Delete this OPDS server?')) return;
+    const name = opdsServers[idx] && opdsServers[idx].name;
+    if (!(await ui.confirm('Remove ' + (name || 'this server') + '?', { ok: 'Remove server', danger: true }))) return;
     try {
       const resp = await fetch('/api/opds/delete', {
         method: 'POST',
@@ -816,10 +633,10 @@
         body: JSON.stringify({index: idx})
       });
       if (!resp.ok) throw new Error(await resp.text());
-      showMessage('OPDS server deleted', false);
+      showMessage('Server removed', false);
       await loadOpdsServers();
     } catch (e) {
-      showMessage('Error: ' + e.message, true);
+      showMessage('Could not remove server: ' + e.message, true);
     }
   }
 
@@ -832,5 +649,5 @@
     await loadOpdsServers();
   })();
 </script>
-</body>
+  </body>
 </html>
