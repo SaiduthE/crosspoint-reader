@@ -18,7 +18,16 @@ class EpubReaderChapterSelectionActivity final : public UiListActivity {
   // nav.top via itemsWindowFirst (see fui::ListProps); refreshing it also
   // batch-prewarms the window's fallback glyphs, so each page of the list
   // pays one bounded SD pass and repaints stay RAM-only.
-  static constexpr int TOC_WINDOW = 24;
+  //
+  // The window must hold every row list() lays out from nav.top plus one
+  // (the partial-row preview): nav.visibleRows + 1. On the 7.8" panel at
+  // 1.5x, Lyra's 60 px rows fit ~28 in the band -- the old 24 read past the
+  // array into the members below it, and the garbage ListItem's value /
+  // sectionHeading pointers panicked getTextWidth (LoadProhibited on
+  // entering the chapter list, 2026-09-20/21). 40 covers the tallest band
+  // with the densest theme; buildScreen also hands list() the window count
+  // so a short window can only show blank rows, never read past the array.
+  static constexpr int TOC_WINDOW = 40;
   std::string windowLabels[TOC_WINDOW];
   freeink::ui::ListItem windowItems[TOC_WINDOW];
   int windowStart = -1;
