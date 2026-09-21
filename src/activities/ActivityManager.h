@@ -66,6 +66,8 @@ class ActivityManager {
   // This variable must only be set by the main loop, to avoid race conditions
   std::atomic<bool> requestedUpdate{false};
 
+  bool deepSleepRequested = false;
+
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
@@ -107,6 +109,22 @@ class ActivityManager {
   bool handleForcedRefresh();
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
+
+  // The power button's long-press menu (eMinimal): pushed over the current
+  // activity, which gets the result handler. No-op while it is already open or
+  // a transition is pending.
+  void openPowerMenu();
+  bool isPowerMenuOpen() const;
+
+  // Deep sleep asked for from inside an activity (the power menu's Sleep row).
+  // An activity must not sleep the device itself — enterDeepSleep() re-enters
+  // loop() to paint the sleep screen — so it sets this and the main loop acts.
+  void requestDeepSleep() { deepSleepRequested = true; }
+  bool consumeDeepSleepRequest() {
+    const bool requested = deepSleepRequested;
+    deepSleepRequested = false;
+    return requested;
+  }
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.

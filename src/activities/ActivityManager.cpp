@@ -21,6 +21,7 @@
 #include "network/CrossPointWebServerActivity.h"
 #include "network/UsbDriveActivity.h"
 #include "reader/ReaderActivity.h"
+#include "PowerMenuActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
 #include "util/BmpViewerActivity.h"
@@ -346,6 +347,25 @@ bool ActivityManager::isReaderActivity() const {
 }
 
 bool ActivityManager::handleForcedRefresh() { return currentActivity && currentActivity->handleForcedRefresh(); }
+
+bool ActivityManager::isPowerMenuOpen() const { return currentActivity && currentActivity->name == "PowerMenu"; }
+
+void ActivityManager::openPowerMenu() {
+  if (!currentActivity || isPowerMenuOpen() || pendingAction != PendingAction::None) return;
+  // The handler runs on the pop, before the returned-to activity repaints, so a
+  // forced refresh scheduled here lands on that repaint (the reader turns it
+  // into a full-refresh page render; the others repaint as a screen change,
+  // which the driver already clears with a GC16).
+  currentActivity->startActivityForResult(std::make_unique<PowerMenuActivity>(renderer, mappedInput),
+                                          [this](const ActivityResult& result) {
+                                            if (result.isCancelled) return;
+                                            const auto* menu = std::get_if<MenuResult>(&result.data);
+                                            if (!menu) return;
+                                            if (menu->action == static_cast<int>(PowerMenuActivity::Action::REFRESH_SCREEN)) {
+                                              handleForcedRefresh();
+                                            }
+                                          });
+}
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
 
