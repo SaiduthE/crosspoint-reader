@@ -46,12 +46,20 @@ class PersistableStoreBase {
   // instead of instantiating serializeJson/deserializeJson in their own TU —
   // that per-TU duplication is exactly what this class exists to prevent.
 
-  // Serializes doc and writes it to path (ensures /.crosspoint exists). Logs on failure.
-  static bool writeDocToFile(const char* path, const JsonDocument& doc);
+  // Serializes doc and writes it to path (ensures /.crosspoint exists). Logs
+  // on failure. The bytes go to a sibling .tmp that is renamed into place, so
+  // a reset mid-write leaves the previous file, never a truncated one. With
+  // keepBackup the previous file is first rotated to .bak (only when it holds
+  // something: an empty current file must not evict a good backup) so
+  // readDocFromFile() has a fallback. The stores use it; per-book JSON does
+  // not need the second file.
+  static bool writeDocToFile(const char* path, const JsonDocument& doc, bool keepBackup = false);
 
   // Reads path and parses it into doc. Returns false silently when the file
-  // does not exist (expected on first boot); logs on read/parse failure.
-  static bool readDocFromFile(const char* path, JsonDocument& doc);
+  // does not exist (expected on first boot); logs on read/parse failure. When
+  // path is missing, empty or unparseable and a .bak exists, loads that
+  // instead and sets *fromBackup, so the caller can rewrite the primary.
+  static bool readDocFromFile(const char* path, JsonDocument& doc, bool* fromBackup = nullptr);
 
  protected:
   /**
@@ -103,9 +111,14 @@ class PersistableStore : public PersistableStoreBase {
     std::lock_guard<std::mutex> lock(storeMutex);
     JsonDocument doc;
     static_cast<const T*>(this)->toJson(doc);
-    return writeDocToFile(T::getFilePath(), doc);
+    return writeDocToFile(T::getFilePath(), doc, /*keepBackup=*/true);
   }
 
+  // A store that fails to load runs on defaults, and the next save writes
+  // those defaults over whatever was on the card -- which is how a panic on
+  // 2026-09-20 cost every setting (theme back to Lyra, the lot). Hence the
+  // .bak: a primary that is missing, empty or unparseable falls back to the
+  // last good save, and the primary is rewritten from it.
   bool loadFromFile() {
     bool ok;
     bool doResave;
@@ -113,17 +126,18 @@ class PersistableStore : public PersistableStoreBase {
       std::lock_guard<std::mutex> lock(storeMutex);
       resaveRequested = false;
       JsonDocument doc;
-      if (!readDocFromFile(T::getFilePath(), doc)) {
+      bool fromBackup = false;
+      if (!readDocFromFile(T::getFilePath(), doc, &fromBackup)) {
         return false;
       }
       ok = static_cast<T*>(this)->fromJson(doc.as<JsonVariantConst>());
       // Read the flag under the lock that guards the fromJson() that set it.
-      doResave = resaveRequested;
+      doResave = resaveRequested || fromBackup;
       resaveRequested = false;
     }
     // Deliberately outside the lock: saveToFile() takes storeMutex itself.
     if (ok && doResave && !saveToFile()) {
-      LOG_ERR("PERSIST", "Failed to resave %s after format update", T::getFilePath());
+      LOG_ERR("PERSIST", "Failed to resave %s after format update or backup restore", T::getFilePath());
     }
     return ok;
   }
