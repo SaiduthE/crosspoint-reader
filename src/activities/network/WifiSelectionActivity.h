@@ -13,6 +13,7 @@
 struct Rect;
 struct ThemeMetrics;
 struct WifiCredential;
+class WifiPhoneSetup;
 
 // Structure to hold WiFi network information
 struct WifiNetworkInfo {
@@ -21,6 +22,7 @@ struct WifiNetworkInfo {
   bool isEncrypted;
   bool hasSavedPassword;             // Whether we have saved credentials for this network
   bool isHiddenPlaceholder = false;  // Synthetic "Add hidden network..." list entry
+  uint8_t channel = 0;               // From the scan; the phone-setup portal is raised on it
 };
 
 // WiFi selection states
@@ -34,7 +36,8 @@ enum class WifiSelectionState {
   CONNECTED,          // Successfully connected
   SAVE_PROMPT,        // Asking user if they want to save the password
   CONNECTION_FAILED,  // Connection failed
-  FORGET_PROMPT       // Asking user if they want to forget the network
+  FORGET_PROMPT,      // Asking user if they want to forget the network
+  PHONE_SETUP         // The phone types the password into a page the device serves (no keyboard here)
 };
 
 /**
@@ -98,6 +101,17 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   int savePromptSelection = 0;
   int forgetPromptSelection = 0;
 
+  // Boards without Left/Right or touch cannot drive the on-screen keyboard,
+  // so the password (and a hidden network's name) is typed on a phone over a
+  // portal the device raises -- vault 04 §11. Alive only in PHONE_SETUP.
+  std::unique_ptr<WifiPhoneSetup> phoneSetup;
+  int phoneSetupPaintedPhase = -1;  // last phase drawn, so a change repaints once
+  bool phoneEntersText() const;
+  void startPhoneSetup();
+  void loopPhoneSetup();
+  void finishPhoneSetup(bool connected);
+  void renderPhoneSetup(const Rect* screen, const ThemeMetrics* metrics) const;
+
   // Connection timeout
   static constexpr unsigned long CONNECTION_TIMEOUT_MS = 15000;
   static constexpr unsigned long AUTO_CONNECTION_TIMEOUT_MS = 7000;
@@ -142,8 +156,13 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
 
  public:
   explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoConnect = true);
+  ~WifiSelectionActivity() override;  // out of line: phoneSetup's type is complete only in the .cpp
   void onEnter() override;
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // The phone-setup portal answers DNS and HTTP from loop(); keep it quick
+  // and keep the device awake while someone is typing on their phone.
+  bool skipLoopDelay() override { return state == WifiSelectionState::PHONE_SETUP; }
+  bool preventAutoSleep() override { return state == WifiSelectionState::PHONE_SETUP; }
 };

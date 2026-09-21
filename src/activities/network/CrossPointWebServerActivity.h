@@ -7,6 +7,7 @@
 #include "NetworkModeSelectionActivity.h"
 #include "activities/Activity.h"
 #include "network/CrossPointWebServer.h"
+#include "network/PhonePortal.h"
 
 // Web server activity states
 enum class WebServerActivityState {
@@ -36,6 +37,9 @@ class CrossPointWebServerActivity final : public Activity {
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
+
+  // Hotspot mode: the access point, captive DNS and mDNS behind the QR.
+  PhonePortal portal;
 
   // Server status
   std::string connectedIP;

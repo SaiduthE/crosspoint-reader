@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Wi-Fi setup – e-Minimal</title>
+    <link rel="stylesheet" href="/css/app.css" />
+    <style>
+      main {
+        max-width: calc(480px + 2 * var(--gutter));
+        padding-top: 32px;
+      }
+      h1 {
+        margin-bottom: 24px;
+      }
+      #connect {
+        margin-top: 8px;
+      }
+      #status {
+        margin-top: 16px;
+        min-height: 1.5em;
+      }
+      #status:empty {
+        display: none;
+      }
+      #status.error {
+        color: var(--danger);
+      }
+      #status.ok {
+        color: var(--ok);
+      }
+      #status .spinner {
+        margin-right: 8px;
+      }
+      .muted {
+        font-size: 0.875rem;
+        max-width: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Connect your reader to Wi-Fi</h1>
+      <div class="card">
+        <form id="form" autocomplete="off">
+          <div class="field">
+            <label for="ssid">Network</label>
+            <input type="text" id="ssid" name="ssid" list="networks" maxlength="32" required autocapitalize="none" />
+            <datalist id="networks"></datalist>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <div class="field-row">
+              <input type="password" id="password" name="password" maxlength="63" autocapitalize="none" autocorrect="off" />
+              <button type="button" class="btn" id="toggle">Show</button>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" id="connect">Connect</button>
+        </form>
+        <div id="status" role="status" aria-live="polite"></div>
+      </div>
+      <p class="muted">
+        The reader saves the network and joins it. This hotspot closes by itself once it is connected; your phone will
+        go back to its usual network.
+      </p>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const form = $("form"), ssid = $("ssid"), password = $("password"), connect = $("connect"), status = $("status");
+      let polling = null;
+      let lostSince = 0;
+
+      // The hotspot may move channel while the reader joins the home network;
+      // a phone re-associates within seconds. Keep asking through that gap.
+      const LOST_LIMIT_MS = 45000;
+      const POLL_MS = 1000;
+
+      function setStatus(text, cls, spinning) {
+        status.className = cls || "";
+        status.innerHTML = (spinning ? '<span class="spinner"></span>' : "") + text;
+      }
+
+      function fetchTimeout(url, opts, ms) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ms);
+        return fetch(url, Object.assign({ cache: "no-store", signal: ctrl.signal }, opts || {})).finally(() =>
+          clearTimeout(timer)
+        );
+      }
+
+      function lockForm(locked) {
+        ssid.disabled = locked;
+        password.disabled = locked;
+        connect.disabled = locked;
+        connect.textContent = locked ? "Connecting…" : "Connect";
+      }
+
+      function showState(s) {
+        if (s.state === "connecting") {
+          lockForm(true);
+          setStatus("Joining " + s.ssid + "…", "", true);
+        } else if (s.state === "connected") {
+          lockForm(true);
+          connect.textContent = "Connected";
+          setStatus(
+            "<b>Connected to " + s.ssid + "</b>" + (s.ip ? " as " + s.ip : "") +
+              ".<br>The reader has saved the network. You can close this page.",
+            "ok"
+          );
+          stopPolling();
+        } else if (s.state === "failed") {
+          lockForm(false);
+          setStatus("<b>Couldn’t join " + s.ssid + ".</b> " + (s.error || "") + " Check the password and try again.", "error");
+          stopPolling();
+          password.focus();
+        } else {
+          lockForm(false);
+        }
+      }
+
+      function stopPolling() {
+        if (polling) clearInterval(polling);
+        polling = null;
+      }
+
+      function startPolling() {
+        stopPolling();
+        lostSince = 0;
+        polling = setInterval(async () => {
+          try {
+            const r = await fetchTimeout("/api/setup", {}, 3000);
+            if (!r.ok) throw new Error(r.status);
+            lostSince = 0;
+            showState(await r.json());
+          } catch (e) {
+            if (!lostSince) lostSince = Date.now();
+            const gone = Date.now() - lostSince;
+            if (gone > LOST_LIMIT_MS) {
+              stopPolling();
+              lockForm(false);
+              setStatus(
+                "Lost contact with the reader. Look at its screen: if it says connected, you are done; otherwise rejoin its hotspot and try again.",
+                "error"
+              );
+            } else if (gone > 4000) {
+              setStatus("Waiting for the reader… (it may briefly drop this hotspot while it joins)", "", true);
+            }
+          }
+        }, POLL_MS);
+      }
+
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const name = ssid.value.trim();
+        if (!name) {
+          ssid.focus();
+          return;
+        }
+        lockForm(true);
+        setStatus("Sending to the reader…", "", true);
+        try {
+          const r = await fetchTimeout(
+            "/api/setup",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ssid: name, password: password.value }),
+            },
+            5000
+          );
+          if (!r.ok) throw new Error(await r.text());
+          showState({ state: "connecting", ssid: name });
+          startPolling();
+        } catch (e) {
+          lockForm(false);
+          setStatus("The reader did not accept that: " + (e.message || e), "error");
+        }
+      });
+
+      $("toggle").addEventListener("click", () => {
+        const show = password.type === "password";
+        password.type = show ? "text" : "password";
+        $("toggle").textContent = show ? "Hide" : "Show";
+      });
+
+      (async () => {
+        try {
+          const s = await (await fetchTimeout("/api/setup", {}, 4000)).json();
+          if (s.ssid && !ssid.value) ssid.value = s.ssid;
+          showState(s);
+          if (s.state === "connecting") startPolling();
+          if (!ssid.value) ssid.focus();
+          else password.focus();
+        } catch (e) {
+          setStatus("Could not reach the reader. Are you on its hotspot?", "error");
+        }
+        try {
+          const names = await (await fetchTimeout("/api/networks", {}, 4000)).json();
+          const list = $("networks");
+          names.forEach((n) => {
+            const o = document.createElement("option");
+            o.value = n;
+            list.appendChild(o);
+          });
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>

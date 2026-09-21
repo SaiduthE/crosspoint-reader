@@ -16,6 +16,7 @@
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
+#include "PhonePage.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
@@ -24,6 +25,8 @@
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
+#include "html/css/appCss.generated.h"
+#include "html/js/appJs.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
@@ -144,6 +147,9 @@ void CrossPointWebServer::begin() {
   server->on("/", HTTP_GET, [this] { handleRoot(); });
   server->on("/files", HTTP_GET, [this] { handleFileList(); });
   server->on("/js/jszip.min.js", HTTP_GET, [this] { handleJszip(); });
+  // The look every page shares, served once and cached by ETag.
+  server->on("/css/app.css", HTTP_GET, [this] { handleAppCss(); });
+  server->on("/js/app.js", HTTP_GET, [this] { handleAppJs(); });
 
   server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
   server->on("/api/files", HTTP_GET, [this] { handleFileListData(); });
@@ -350,33 +356,23 @@ CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() con
   return status;
 }
 
-static void sendStaticContent(WebServer* server, const char* data, size_t len, const char* etag,
-                              const char* contentType) {
-  // Content is baked into flash at build time, so the ETag is stable for the
-  // lifetime of a firmware image. Honor If-None-Match with a 304 so browsers
-  // reuse their cache instead of re-downloading on every navigation.
-  if (server->header("If-None-Match") == etag) {
-    server->sendHeader("ETag", etag);
-    server->sendHeader("Cache-Control", "no-cache");
-    server->send(304);
-    return;
-  }
-  server->sendHeader("Content-Encoding", "gzip");
-  server->sendHeader("ETag", etag);
-  // no-cache: the browser may cache, but must revalidate (conditional GET)
-  // before reuse — this is what unlocks 304 responses.
-  server->sendHeader("Cache-Control", "no-cache");
-  server->send_P(200, contentType, data, len);
-}
-
 void CrossPointWebServer::handleRoot() const {
-  sendStaticContent(server.get(), HomePageHtml, sizeof(HomePageHtml), HomePageHtmlETag, "text/html");
+  PhonePage::sendStatic(*server, HomePageHtml, sizeof(HomePageHtml), HomePageHtmlETag, "text/html");
   LOG_DBG("WEB", "Served root page");
 }
 
 void CrossPointWebServer::handleJszip() const {
-  sendStaticContent(server.get(), jszip_minJs, jszip_minJsCompressedSize, jszip_minJsETag, "application/javascript");
+  PhonePage::sendStatic(*server, jszip_minJs, jszip_minJsCompressedSize, jszip_minJsETag,
+                        "application/javascript");
   LOG_DBG("WEB", "Served jszip.min.js");
+}
+
+void CrossPointWebServer::handleAppCss() const {
+  PhonePage::sendStatic(*server, appCss, appCssCompressedSize, appCssETag, "text/css");
+}
+
+void CrossPointWebServer::handleAppJs() const {
+  PhonePage::sendStatic(*server, appJs, appJsCompressedSize, appJsETag, "application/javascript");
 }
 
 void CrossPointWebServer::handleNotFound() const {
@@ -389,12 +385,7 @@ void CrossPointWebServer::handleNotFound() const {
 
   // in AP mode, redirect unmatched browser/captive-portal requests to "/" so the OS auto-opens the browser
   // API requests (/api/*) still return 404 so XHR errors surface correctly
-  // see https://en.wikipedia.org/wiki/Captive_portal#Detection
-  if (apMode && !server->uri().startsWith("/api/")) {
-    server->sendHeader("Location", "/", true);
-    server->send(302, "text/plain", "");
-    return;
-  }
+  if (apMode && PhonePage::redirectCaptive(*server)) return;
 
   String message = "404 Not Found\n\n";
   message += "URI: " + server->uri() + "\n";
@@ -505,7 +496,7 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
 bool CrossPointWebServer::isEpubFile(const String& filename) const { return FsHelpers::hasEpubExtension(filename); }
 
 void CrossPointWebServer::handleFileList() const {
-  sendStaticContent(server.get(), FilesPageHtml, sizeof(FilesPageHtml), FilesPageHtmlETag, "text/html");
+  PhonePage::sendStatic(*server, FilesPageHtml, sizeof(FilesPageHtml), FilesPageHtmlETag, "text/html");
 }
 
 void CrossPointWebServer::handleFileListData() const {
@@ -1154,7 +1145,7 @@ void CrossPointWebServer::handleDelete() const {
 }
 
 void CrossPointWebServer::handleSettingsPage() const {
-  sendStaticContent(server.get(), SettingsPageHtml, sizeof(SettingsPageHtml), SettingsPageHtmlETag, "text/html");
+  PhonePage::sendStatic(*server, SettingsPageHtml, sizeof(SettingsPageHtml), SettingsPageHtmlETag, "text/html");
   LOG_DBG("WEB", "Served settings page");
 }
 
@@ -1778,7 +1769,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 // --- Font management handlers ---
 
 void CrossPointWebServer::handleFontsPage() const {
-  sendStaticContent(server.get(), FontsPageHtml, sizeof(FontsPageHtml), FontsPageHtmlETag, "text/html");
+  PhonePage::sendStatic(*server, FontsPageHtml, sizeof(FontsPageHtml), FontsPageHtmlETag, "text/html");
   LOG_DBG("WEB", "Served fonts page");
 }
 
