@@ -3,6 +3,7 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <string>
 
@@ -154,6 +155,14 @@ void EpubReaderChapterSelectionActivity::buildScreen(UiScreen& screen) {
   refreshTocWindow(nav.top);
   props.items = windowItems;
   props.itemsWindowFirst = static_cast<uint16_t>(windowStart);
+  // The list stops at the window's end (it reads item fields while laying
+  // out, so it must never step past the array). A window shorter than the
+  // band shows blank rows instead; the check below says so once.
+  props.itemsWindowCount = static_cast<uint16_t>(windowCount);
+  if (nav.visibleRows + 1 > TOC_WINDOW) {
+    LOG_ERR("ERCS", "TOC window %d too small for %d visible rows; rows past it stay blank", TOC_WINDOW,
+            nav.visibleRows);
+  }
   screen.list(props);
 }
 
