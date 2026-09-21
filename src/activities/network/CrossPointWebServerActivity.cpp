@@ -1,6 +1,5 @@
 #include "CrossPointWebServerActivity.h"
 
-#include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
@@ -14,32 +13,17 @@
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
+#include "components/PhoneJoinPanel.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
 
 namespace {
-// AP Mode configuration
-constexpr const char* AP_SSID = "CrossPoint-Reader";
-constexpr const char* AP_PASSWORD = nullptr;  // Open network for ease of use
-constexpr const char* AP_HOSTNAME = "crosspoint";
+// AP Mode configuration -- open network for ease of use; PhonePortal raises it.
+constexpr const char* AP_SSID = "eMinimal";
+constexpr const char* AP_HOSTNAME = "eminimal";
 constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint8_t AP_MAX_CONNECTIONS = 4;
-constexpr int QR_CODE_WIDTH = 198;
-constexpr int QR_CODE_HEIGHT = 198;
-
-// DNS server for captive portal (redirects all DNS queries to our IP)
-DNSServer* dnsServer = nullptr;
-constexpr uint16_t DNS_PORT = 53;
-
-void stopDnsServer() {
-  if (!dnsServer) return;
-
-  dnsServer->stop();
-  delete dnsServer;
-  dnsServer = nullptr;
-}
 
 void restartMdns(const char* hostname, const char* tag) {
   MDNS.end();
@@ -103,17 +87,17 @@ void CrossPointWebServerActivity::onExit() {
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
   state = WebServerActivityState::SHUTTING_DOWN;
-  stopDnsServer();
+  // Read before the portal drops the AP: that leaves the mode NULL too.
+  const bool wifiWasOn = WiFi.getMode() != WIFI_MODE_NULL;
+  portal.end();  // no-op unless the hotspot was up
   MDNS.end();
 
   // Skip reboot if WiFi was never activated (e.g. user backed out of mode selection).
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    if (isApMode) {
-      WiFi.softAPdisconnect(true);
-    } else {
+  if (wifiWasOn) {
+    if (!isApMode) {
       WiFi.disconnect(false);
+      delay(30);
     }
-    delay(30);
     silentRestart();
   }
 
@@ -215,49 +199,20 @@ void CrossPointWebServerActivity::startAccessPoint() {
   LOG_DBG("WEBACT", "Starting Access Point mode...");
   LOG_DBG("WEBACT", "Free heap before AP start: %d bytes", ESP.getFreeHeap());
 
-  // Configure and start the AP
-  WiFi.mode(WIFI_AP);
-  delay(100);
-
-  // Start soft AP
-  bool apStarted;
-  if (AP_PASSWORD && strlen(AP_PASSWORD) >= 8) {
-    apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
-  } else {
-    // Open network (no password)
-    apStarted = WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
-  }
-
-  if (!apStarted) {
+  PhonePortal::Config config;
+  config.ssid = AP_SSID;
+  config.channel = AP_CHANNEL;
+  config.maxClients = AP_MAX_CONNECTIONS;
+  config.hostname = AP_HOSTNAME;
+  if (!portal.begin(config)) {
     LOG_ERR("WEBACT", "ERROR: Failed to start Access Point!");
     onGoHome();
     return;
   }
 
-  delay(100);  // Wait for AP to fully initialize
-
-  // Get AP IP address
-  const IPAddress apIP = WiFi.softAPIP();
-  char ipStr[16];
-  snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", apIP[0], apIP[1], apIP[2], apIP[3]);
-  connectedIP = ipStr;
-  connectedSSID = AP_SSID;
-
-  LOG_DBG("WEBACT", "Access Point started!");
-  LOG_DBG("WEBACT", "SSID: %s", AP_SSID);
-  LOG_DBG("WEBACT", "IP: %s", connectedIP.c_str());
-
-  // Start mDNS for hostname resolution
-  restartMdns(AP_HOSTNAME, "WEBACT");
-
-  // Start DNS server for captive portal behavior
-  // This redirects all DNS queries to our IP, making any domain typed resolve to us
-  stopDnsServer();
-  dnsServer = new DNSServer();
-  dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
-  dnsServer->start(DNS_PORT, "*", apIP);
-  LOG_DBG("WEBACT", "DNS server started for captive portal");
-
+  connectedIP = portal.ip();
+  connectedSSID = portal.ssid();
+  LOG_DBG("WEBACT", "Access Point started: %s at %s", connectedSSID.c_str(), connectedIP.c_str());
   LOG_DBG("WEBACT", "Free heap after AP start: %d bytes", ESP.getFreeHeap());
 
   // Start the web server
@@ -299,9 +254,7 @@ void CrossPointWebServerActivity::loop() {
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
     // Handle DNS requests for captive portal (AP mode only)
-    if (isApMode && dnsServer) {
-      dnsServer->processNextRequest();
-    }
+    if (isApMode) portal.loop();
 
     // STA mode: Monitor WiFi connection health
     if (!isApMode && webServer && webServer->isRunning()) {
@@ -421,6 +374,7 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 void CrossPointWebServerActivity::renderServerRunning() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
                  isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
@@ -431,67 +385,19 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderWifiIndicator(metrics.topPadding + metrics.headerHeight);
   }
 
-  int startY = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
-  int height10 = renderer.getLineHeight(UI_10_FONT_ID);
-  if (isApMode) {
-    // AP mode display
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, startY, tr(STR_CONNECT_WIFI_HINT), true,
-                      EpdFontFamily::BOLD);
-    startY += height10 + metrics.verticalSpacing * 2;
-
-    // Show QR code for Wifi
-    // follows spec at https://github.com/zxing/zxing/wiki/Barcode-Contents#wi-fi-network-config-android-ios-11
-    const std::string wifiConfig = std::string("WIFI:T:nopass;S:") + connectedSSID + ";;";
-    const Rect qrBoundsWifi(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
-    QrUtils::drawQrCode(renderer, qrBoundsWifi, wifiConfig);
-
-    // Show network name
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      connectedSSID.c_str());
-
-    startY += QR_CODE_HEIGHT + 2 * metrics.verticalSpacing;
-
-    // Show primary URL (hostname)
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, startY, tr(STR_OPEN_URL_HINT), true,
-                      EpdFontFamily::BOLD);
-    startY += height10 + metrics.verticalSpacing * 2;
-
-    std::string hostnameUrl = std::string("http://") + AP_HOSTNAME + ".local/";
-    std::string ipUrl = tr(STR_OR_HTTP_PREFIX) + connectedIP + "/";
-
-    // Show QR code for URL
-    const Rect qrBoundsUrl(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
-    QrUtils::drawQrCode(renderer, qrBoundsUrl, hostnameUrl);
-
-    // Show IP address as fallback
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      hostnameUrl.c_str());
-    renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 100,
-                      ipUrl.c_str());
-  } else {
-    startY += metrics.verticalSpacing * 2;
-
-    // STA mode display (original behavior)
-    // std::string ipInfo = "IP Address: " + connectedIP;
-    renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_OPEN_URL_HINT), true, EpdFontFamily::BOLD);
-    startY += height10;
-    renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_SCAN_QR_HINT), true, EpdFontFamily::BOLD);
-    startY += height10 + metrics.verticalSpacing * 2;
-
-    // Show QR code for URL
-    std::string webInfo = "http://" + connectedIP + "/";
-    const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
-    QrUtils::drawQrCode(renderer, qrBounds, webInfo);
-    startY += QR_CODE_HEIGHT + metrics.verticalSpacing * 2;
-
-    // Show web server URL prominently
-    renderer.drawCenteredText(UI_10_FONT_ID, startY, webInfo.c_str(), true);
-    startY += height10 + 5;
-
-    // Also show hostname URL
-    std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
-    renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
-  }
+  // The same card every phone screen paints: hotspot mode has the join step
+  // and the page; station mode only the page, since the phone is already on
+  // the same network.
+  const int top = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
+  const Rect bounds{0, top, pageWidth, pageHeight - top - metrics.buttonHintsHeight - metrics.verticalSpacing};
+  const std::string hostnameUrl = portal.isUp() ? portal.hostnameUrl() : std::string("http://") + AP_HOSTNAME + ".local/";
+  const std::string altUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + hostnameUrl.substr(sizeof("http://") - 1);
+  PhoneJoinPanel::Content content;
+  content.headline = isApMode ? tr(STR_PHONE_SCAN_HEADLINE) : tr(STR_OPEN_URL_HINT);
+  content.portal = isApMode ? &portal : nullptr;
+  content.pageUrl = "http://" + connectedIP + "/";
+  content.pageAlt = altUrl.c_str();
+  PhoneJoinPanel::draw(renderer, bounds, content);
 
   const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

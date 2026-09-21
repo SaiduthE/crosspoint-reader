@@ -20,7 +20,10 @@
 #include "components/UiAppHelpers.h"
 #include "components/icons/bookmark.h"
 #include "components/icons/cover.h"
+#include "components/icons/hotspot.h"
+#include "components/icons/wifi.h"
 #include "fontIds.h"
+#include "network/NetworkLink.h"
 
 // Internal constants
 namespace {
@@ -370,6 +373,13 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   } else {
     clockText[0] = '\0';
   }
+  // A joined station or a running hotspot shows its 32 px glyph beside the
+  // battery; while reading the radio is off and nothing is drawn. Reserved
+  // with the battery so the title never runs under it.
+  const NetworkLink::State link = NetworkLink::state();
+  constexpr int16_t linkIconSize = 32;
+  const int16_t linkReserve =
+      link == NetworkLink::State::OFF ? 0 : static_cast<int16_t>(linkIconSize + batteryPercentSpacing * 2);
 
   fui::HeaderProps props;
   props.title = title;
@@ -402,7 +412,7 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     const int titleTop = static_cast<int>(band.height) - tokens.headerUnderline - tokens.spaceMd - titleLineHeight;
     props.titleOffsetY = static_cast<int16_t>(titleTop - (static_cast<int>(band.height) - titleLineHeight) / 2);
   } else {
-    const int16_t reserve = static_cast<int16_t>(batteryReserve + tokens.spaceMd);
+    const int16_t reserve = static_cast<int16_t>(batteryReserve + linkReserve + tokens.spaceMd);
     if (batteryLeft) {
       props.leftReserve = reserve;
     } else {
@@ -465,6 +475,18 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     const int16_t clockX = batteryLeft ? static_cast<int16_t>(band.right() - batteryEdgeInset - clockWidth)
                                        : static_cast<int16_t>(band.x + batteryEdgeInset - clockBearing);
     ui.target.text(fui::Rect{clockX, band.y, clockWidth, batteryH}, clockText, tokens.smallText);
+  }
+
+  if (linkReserve > 0) {
+    // Inboard of the battery and on its centre line: the component centres
+    // the glyph on rect.y + rect.height / 2, which for a 0-height strip
+    // (RoundedRaff) is the band's top edge. The bitmaps carry 6 px of blank
+    // rows above their ink, so a box centred there would put the ink's top
+    // above the screen; keep the ink's first row on the panel instead.
+    constexpr int linkIconInkTop = 6;
+    const int iconX = batteryLeft ? batteryX + batteryReserve + batteryPercentSpacing * 2 : batteryX - linkReserve;
+    const int iconY = std::max(band.y + batteryH / 2 - linkIconSize / 2, -linkIconInkTop);
+    renderer.drawIcon(link == NetworkLink::State::STATION ? WifiIcon : HotspotIcon, iconX, iconY, linkIconSize);
   }
 
   if (manualRightLabel) {

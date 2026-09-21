@@ -1,5 +1,6 @@
 #include "WifiSelectionActivity.h"
 
+#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -13,8 +14,10 @@
 #include "MappedInputManager.h"
 #include "WifiCredentialStore.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/PhoneJoinPanel.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/WifiPhoneSetup.h"
 
 namespace fui = freeink::ui;
 
@@ -27,6 +30,8 @@ constexpr fui::ActionId ACTION_PROMPT = 3;
 WifiSelectionActivity::WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                              const bool autoConnect)
     : Activity("WifiSelection", renderer, mappedInput), UiAppHost(renderer), allowAutoConnect(autoConnect) {}
+
+WifiSelectionActivity::~WifiSelectionActivity() = default;
 
 void WifiSelectionActivity::onRowEvent(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<WifiSelectionActivity*>(user);
@@ -170,6 +175,9 @@ void WifiSelectionActivity::onExit() {
   WiFi.scanDelete();
   LOG_DBG("WIFI", "Free heap after scanDelete: %d bytes", ESP.getFreeHeap());
 
+  // A phone-setup portal still up here means we were left mid-flow.
+  phoneSetup.reset();
+
   // Note: We do NOT disconnect WiFi here - the parent activity
   // (CrossPointWebServerActivity) manages WiFi connection state. We just clean
   // up the scan and task.
@@ -239,10 +247,12 @@ void WifiSelectionActivity::processWifiScanResults() {
       network.rssi = rssi;
       network.isEncrypted = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
       network.hasSavedPassword = WIFI_STORE.hasSavedCredential(network.ssid);
+      network.channel = static_cast<uint8_t>(WiFi.channel(i));
       networks.push_back(std::move(network));
     } else if (rssi > it->rssi) {
       it->rssi = rssi;
       it->isEncrypted = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+      it->channel = static_cast<uint8_t>(WiFi.channel(i));
     }
   }
 
@@ -342,6 +352,11 @@ void WifiSelectionActivity::selectNetwork(const int index) {
 }
 
 void WifiSelectionActivity::promptPasswordEntry() {
+  if (phoneEntersText()) {
+    startPhoneSetup();
+    return;
+  }
+
   // Show password entry
   state = WifiSelectionState::PASSWORD_ENTRY;
   // Don't allow screen updates while changing activity
@@ -365,6 +380,11 @@ void WifiSelectionActivity::promptHiddenSsid() {
   usedSavedPassword = false;
   enteredPassword.clear();
   autoConnecting = false;
+
+  if (phoneEntersText()) {
+    startPhoneSetup();  // the page takes the network name as well
+    return;
+  }
 
   // Suppress rendering during the activity transition (see render()).
   state = WifiSelectionState::HIDDEN_SSID_ENTRY;
@@ -473,13 +493,13 @@ void WifiSelectionActivity::attemptConnection() {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
 
-  // Set hostname so routers show "CrossPoint-Reader-AABBCCDDEEFF" instead of "esp32-XXXXXXXXXXXX"
+  // Set hostname so routers show "eMinimal-AABBCCDDEEFF" instead of "esp32-XXXXXXXXXXXX"
   uint8_t mac[6] = {};
   const esp_err_t macResult = esp_read_mac(mac, ESP_MAC_WIFI_STA);
   if (macResult == ESP_OK) {
-    char hostname[sizeof("CrossPoint-Reader-") + 12];
-    snprintf(hostname, sizeof(hostname), "CrossPoint-Reader-%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3],
-             mac[4], mac[5]);
+    char hostname[sizeof("eMinimal-") + 12];
+    snprintf(hostname, sizeof(hostname), "eMinimal-%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4],
+             mac[5]);
     WiFi.setHostname(hostname);
   } else {
     LOG_ERR("WIFI", "Failed to read station MAC for hostname (err=%d)", static_cast<int>(macResult));
@@ -593,6 +613,11 @@ void WifiSelectionActivity::loop() {
       requestUpdate();
     }
     processWifiScanResults();
+    return;
+  }
+
+  if (state == WifiSelectionState::PHONE_SETUP) {
+    loopPhoneSetup();
     return;
   }
 
@@ -753,6 +778,19 @@ void WifiSelectionActivity::loop() {
       return;
     }
 
+    // Four-button boards: holding Select on a saved network is the Forget
+    // that Left does elsewhere. wasLongPressed() swallows the release, so a
+    // hold never doubles as Connect. Polled only on a saved row so a plain
+    // Select elsewhere keeps its release.
+    const bool savedRow = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
+    if (savedRow && phoneEntersText() && mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, 800)) {
+      selectedSSID = networks[selectedNetworkIndex].ssid;
+      state = WifiSelectionState::FORGET_PROMPT;
+      forgetPromptSelection = 0;  // Default to "Cancel"
+      requestUpdate();
+      return;
+    }
+
     // Check for Confirm button to select network or rescan
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       if (!networks.empty()) {
@@ -844,8 +882,9 @@ void WifiSelectionActivity::render(RenderLock&&) {
   // so 32 truncated it. See ClockSyncActivity for the same class of bug.
   char countStr[64];
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
+  const bool phoneScreen = state == WifiSelectionState::PHONE_SETUP;
   GUI.drawHeader(renderer, Rect{screen.x, screen.y + metrics.topPadding, screen.width, metrics.headerHeight},
-                 tr(STR_WIFI_NETWORKS), countStr);
+                 phoneScreen ? tr(STR_PHONE_SETUP_TITLE) : tr(STR_WIFI_NETWORKS), phoneScreen ? nullptr : countStr);
   GUI.drawSubHeader(
       renderer,
       Rect{screen.x, screen.y + metrics.topPadding + metrics.headerHeight, screen.width, metrics.tabBarHeight},
@@ -882,6 +921,9 @@ void WifiSelectionActivity::render(RenderLock&&) {
     }
     case WifiSelectionState::CONNECTION_FAILED:
       renderConnectionFailed(&screen, &metrics);
+      break;
+    case WifiSelectionState::PHONE_SETUP:
+      renderPhoneSetup(&screen, &metrics);
       break;
   }
 
@@ -1014,14 +1056,18 @@ void WifiSelectionActivity::renderNetworkList(const Rect* screen, const ThemeMet
     UITheme::drawCenteredText(renderer, *screen, SMALL_FONT_ID, top + height + 10, tr(STR_PRESS_OK_SCAN));
   }
 
+  // Four-button boards have no Left/Right for Forget/Retry: the last two
+  // slots are the Up/Down buttons, and Forget is a held Select instead.
+  const bool fourButtons = phoneEntersText();
   GUI.drawHelpText(renderer,
                    Rect{screen->x, screen->y + screen->height - metrics->contentSidePadding - 15, screen->width, 20},
-                   tr(STR_NETWORK_LEGEND));
+                   fourButtons ? tr(STR_NETWORK_LEGEND_HOLD) : tr(STR_NETWORK_LEGEND));
 
   const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
   const char* forgetLabel = hasSavedPassword ? tr(STR_FORGET_BUTTON) : "";
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, tr(STR_RETRY));
+  const auto labels = fourButtons ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                                  : mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, tr(STR_RETRY));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -1088,6 +1134,169 @@ void WifiSelectionActivity::renderConnectionFailed(const Rect* screen, const The
 
   // Use centralized button hints
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DONE), "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+// Four plain buttons and no touch: nothing on the panel can drive the
+// on-screen keyboard, so text comes from a phone (vault 04 §11). Boards with
+// Left/Right, a ladder or touch keep upstream's keyboard.
+bool WifiSelectionActivity::phoneEntersText() const {
+  const auto& profile = BoardConfig::ACTIVE;
+  if (mappedInput.hasTouch()) return false;
+  if (profile.inputStyle != BoardConfig::InputStyle::DigitalButtons) return false;
+  return profile.input.left == BoardConfig::PIN_UNASSIGNED || profile.input.right == BoardConfig::PIN_UNASSIGNED;
+}
+
+void WifiSelectionActivity::startPhoneSetup() {
+  std::vector<WifiPhoneSetup::Target> visible;
+  visible.reserve(realNetworkCount);
+  for (const auto& network : networks) {
+    if (!network.isHiddenPlaceholder) visible.push_back({network.ssid, network.channel});
+  }
+
+  phoneSetup = std::make_unique<WifiPhoneSetup>(selectedSSID, std::move(visible));
+  phoneSetupPaintedPhase = -1;
+  state = WifiSelectionState::PHONE_SETUP;
+  if (!phoneSetup->begin()) {
+    LOG_ERR("WIFI", "Phone setup portal failed to start");
+    connectionError = tr(STR_PHONE_SETUP_ERROR);
+    phoneSetup.reset();
+    state = WifiSelectionState::CONNECTION_FAILED;
+  }
+  requestUpdate();
+}
+
+void WifiSelectionActivity::loopPhoneSetup() {
+  if (!phoneSetup) {
+    state = WifiSelectionState::NETWORK_LIST;
+    requestUpdate();
+    return;
+  }
+
+  const auto phase = phoneSetup->loop();
+
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    // Joined already: Back just skips the wait for the phone to see it.
+    const bool joined = phase == WifiPhoneSetup::Phase::CONNECTED || phase == WifiPhoneSetup::Phase::DONE;
+    finishPhoneSetup(joined);
+    return;
+  }
+
+  switch (phase) {
+    case WifiPhoneSetup::Phase::DONE:
+      finishPhoneSetup(true);
+      return;
+    case WifiPhoneSetup::Phase::ERROR:
+      connectionError = tr(STR_PHONE_SETUP_ERROR);
+      phoneSetup.reset();
+      state = WifiSelectionState::CONNECTION_FAILED;
+      requestUpdate();
+      return;
+    default:
+      break;
+  }
+
+  // One partial refresh per phase change: the status line is the only thing
+  // that moves, and the phone's polling must not cost a single repaint.
+  if (static_cast<int>(phase) != phoneSetupPaintedPhase) {
+    phoneSetupPaintedPhase = static_cast<int>(phase);
+    requestUpdate();
+  }
+}
+
+void WifiSelectionActivity::finishPhoneSetup(const bool connected) {
+  if (!phoneSetup) return;
+
+  if (connected) {
+    selectedSSID = phoneSetup->ssid();
+    enteredPassword = phoneSetup->password();
+    connectedIP = phoneSetup->ip();
+  }
+  // Drops the portal; a joined station survives it.
+  phoneSetup->end();
+  phoneSetup.reset();
+
+  if (!connected) {
+    WiFi.disconnect(false);
+    state = WifiSelectionState::NETWORK_LIST;
+    requestUpdate();
+    return;
+  }
+
+  LOG_DBG("WIFI", "Phone setup joined %s (%s)", selectedSSID.c_str(), connectedIP.c_str());
+  {
+    // The phone typed it into this device on purpose: saved, no prompt.
+    RenderLock lock(*this);
+    WIFI_STORE.addCredential(selectedSSID, enteredPassword);
+    WIFI_STORE.setLastConnectedSsid(selectedSSID);
+  }
+  usedSavedPassword = true;
+  autoConnecting = false;
+
+  if (halClock.isAvailable() && !SETTINGS.clockHasBeenSynced) {
+    if (halClock.syncFromNTP()) {
+      SETTINGS.clockHasBeenSynced = 1;
+      SETTINGS.saveToFile();
+    }
+  }
+  onComplete(true);
+}
+
+void WifiSelectionActivity::renderPhoneSetup(const Rect* screen, const ThemeMetrics* metrics) const {
+  if (!phoneSetup) return;
+
+  char headline[96];
+  char status[160];
+  const bool hidden = selectedSSID.empty();
+  if (hidden) {
+    snprintf(headline, sizeof(headline), "%s", tr(STR_PHONE_SETUP_HEADLINE_HIDDEN));
+  } else {
+    snprintf(headline, sizeof(headline), tr(STR_PHONE_SETUP_HEADLINE), selectedSSID.c_str());
+  }
+
+  const char* target = phoneSetup->ssid().empty() ? selectedSSID.c_str() : phoneSetup->ssid().c_str();
+  switch (phoneSetup->phase()) {
+    case WifiPhoneSetup::Phase::PHONE_JOINED:
+      snprintf(status, sizeof(status), "%s", tr(STR_PHONE_SETUP_JOINED));
+      break;
+    case WifiPhoneSetup::Phase::CONNECTING:
+      snprintf(status, sizeof(status), tr(STR_PHONE_SETUP_CONNECTING), target);
+      break;
+    case WifiPhoneSetup::Phase::CONNECTED:
+    case WifiPhoneSetup::Phase::DONE:
+      snprintf(status, sizeof(status), tr(STR_PHONE_SETUP_CONNECTED), target);
+      break;
+    case WifiPhoneSetup::Phase::FAILED:
+      switch (phoneSetup->failReason()) {
+        case WifiPhoneSetup::FailReason::NOT_FOUND:
+          snprintf(status, sizeof(status), "%s", tr(STR_PHONE_SETUP_FAILED_NOT_FOUND));
+          break;
+        case WifiPhoneSetup::FailReason::TIMEOUT:
+          snprintf(status, sizeof(status), "%s", tr(STR_PHONE_SETUP_FAILED_TIMEOUT));
+          break;
+        default:
+          snprintf(status, sizeof(status), "%s", tr(STR_PHONE_SETUP_FAILED_PASSWORD));
+          break;
+      }
+      break;
+    default:
+      snprintf(status, sizeof(status), "%s", tr(STR_PHONE_SETUP_WAITING));
+      break;
+  }
+
+  const int top = screen->y + metrics->topPadding + metrics->headerHeight + metrics->tabBarHeight +
+                  metrics->verticalSpacing * 2;
+  const Rect bounds{screen->x, top, screen->width, screen->y + screen->height - top};
+  PhoneJoinPanel::Content content;
+  content.headline = headline;
+  content.status = status;
+  content.portal = &phoneSetup->portal();
+  // The captive popup opens the page by itself; the second QR is for a phone
+  // that does not pop it, instead of typing the address.
+  content.pageUrl = phoneSetup->portal().pageUrl();
+  PhoneJoinPanel::draw(renderer, bounds, content);
+
+  const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
