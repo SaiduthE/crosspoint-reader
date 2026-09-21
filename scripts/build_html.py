@@ -49,12 +49,13 @@ def sanitize_identifier(name: str) -> str:
 
 for root, _, files in os.walk(SRC_DIR):
     for file in files:
-        if file.endswith(".html") or file.endswith(".js"):
+        if file.endswith(".html") or file.endswith(".js") or file.endswith(".css"):
             file_path = os.path.join(root, file)
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Only minify HTML files; JS files are typically pre-minified (e.g., jszip.min.js)
+            # and CSS is small enough that gzip does the work.
             if file.endswith(".html"):
                 processed = minify_html(content)
             else:
@@ -67,7 +68,7 @@ for root, _, files in os.walk(SRC_DIR):
 
             # Create valid C identifier from filename
             # Use appropriate suffix based on file type
-            suffix = "Html" if file.endswith(".html") else "Js"
+            suffix = "Html" if file.endswith(".html") else ("Css" if file.endswith(".css") else "Js")
             base_name = sanitize_identifier(f"{os.path.splitext(file)[0]}{suffix}")
             header_path = os.path.join(root, f"{base_name}.generated.h")
 
