@@ -227,16 +227,26 @@ bool HalGPIO::verifyPowerButtonWakeup() {
   // wheel click, so a click wake is always released before this samples and
   // verification would re-sleep on every wake. Its wheel has hard external
   // pull-ups, so the ghost-wake debounce this implements is not needed.
-  // eMinimal 7.8: same latency problem (S3 with 16 MB flash and 8 MB octal PSRAM
-  // to bring up before setup(); measured 350 ms to this sample, a tap is long
-  // gone), and the SDK now pulls the wake pin in the RTC domain, so there is no
-  // floating-pin ghost wake to debounce. The device design has no power button
-  // at all — sleep is a long-press on Back — so a pocket-press guard is not
-  // wanted either. Without this exemption every tap wake re-slept before the
-  // display was touched, invisibly.
-  if (BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() || BoardConfig::isEMinimal78() ||
-      BoardConfig::ACTIVE.input.power < 0) {
+  if (BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() || BoardConfig::ACTIVE.input.power < 0) {
     return true;
+  }
+
+  // eMinimal 7.8: hold to wake, by design. The power button is the fifth key
+  // (GPIO 15) and a tap must not wake a reader in a bag, so the finger has to
+  // stay down until POWER_WAKE_HOLD_MS after reset. Boot to this point is ~350 ms
+  // (16 MB flash, 8 MB octal PSRAM), so the wait below is the remainder — about
+  // a second from the press. A release before then returns false and setup()
+  // re-sleeps before the display or settings are touched; the SDK pulls the
+  // wake pin in the RTC domain, so a floating-pin ghost wake never gets here.
+  if (BoardConfig::isEMinimal78()) {
+    constexpr unsigned long POWER_WAKE_HOLD_MS = 700;
+    while (millis() < POWER_WAKE_HOLD_MS) {
+      if (!inputMgr.isPowerButtonPhysicallyPressed()) {
+        return false;
+      }
+      delay(5);
+    }
+    return inputMgr.isPowerButtonPhysicallyPressed();
   }
 
   constexpr unsigned long POWER_WAKE_STABILITY_MS = 10;

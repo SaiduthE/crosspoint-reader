@@ -63,6 +63,11 @@ static unsigned long lastX4ProPowerClickAt = 0;
 namespace {
 constexpr unsigned long X4PRO_POWER_DOUBLE_CLICK_MS = 500;
 constexpr unsigned long X4PRO_POWER_CLICK_MAX_HOLD_MS = 300;
+#if FREEINK_DEVICE_EMINIMAL
+// eMinimal: a hold on the power button opens the power menu instead of sleeping
+// outright. Same feel as the wake hold (HalGPIO::verifyPowerButtonWakeup).
+constexpr unsigned long POWER_MENU_HOLD_MS = 700;
+#endif
 }  // namespace
 
 // A wake hold must never become an in-app power-button action.  Boot may continue
@@ -664,6 +669,14 @@ void loop() {
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd == "BATTERY") {
+        // Bench check of the battery divider (GPIO 8 on eMinimal): raw ADC
+        // millivolts x divider, the 10 % notch, and the smoothed value the
+        // status bar shows. Reads the pin right now, no cache.
+        const BatteryMonitor battery;
+        const uint16_t mv = battery.readMillivolts();
+        logSerial.printf("BATTERY %u mV, notch %u%%, shown %u%%\n", mv, BatteryMonitor::percentageFromMillivolts(mv),
+                         powerManager.getBatteryPercentage());
       } else if (cmd == "METRICS") {
         // Bench layout tuning without a reflash (see UITheme::setMetric):
         //   CMD:METRICS                       list every tunable metric
@@ -770,12 +783,35 @@ void loop() {
     return;
   }
 
+  // An activity asked for sleep (the power menu's Sleep row).
+  if (activityManager.consumeDeepSleepRequest()) {
+    LOG_DBG("MAIN", "Sleep requested from the power menu");
+    enterDeepSleep();
+    return;
+  }
+
   // A hold that woke the device must be released before it can count as a new
   // in-app long press. Otherwise a user who keeps holding after wake would put
   // the device straight back to sleep once allowSleepAt expires.
   static bool powerReleasedSinceWake = false;
   if (!gpio.isPressed(HalGPIO::BTN_POWER)) powerReleasedSinceWake = true;
 
+#if FREEINK_DEVICE_EMINIMAL
+  // The hold opens the power menu (Sleep is its first row) so the button can
+  // carry other shortcuts too. Once per hold: latched until the release, and the
+  // loop must fall through so ActivityManager::loop() can push it.
+  static bool powerMenuHoldLatched = false;
+  if (!gpio.isPressed(HalGPIO::BTN_POWER)) powerMenuHoldLatched = false;
+  if (powerReleasedSinceWake && millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
+      !powerMenuHoldLatched && gpio.getPowerButtonHeldTime() > POWER_MENU_HOLD_MS) {
+    // If the screenshot combination is potentially being pressed, don't open it
+    if (!gpio.isPressed(HalGPIO::BTN_DOWN)) {
+      powerMenuHoldLatched = true;
+      LOG_DBG("MAIN", "Power button held %lums, opening the power menu", gpio.getPowerButtonHeldTime());
+      activityManager.openPowerMenu();
+    }
+  }
+#else
   // On X4 Pro with SLEEP, a press still within the click window is a
   // double-click candidate — let it be released and evaluated above instead
   // of sleeping on button-down.
@@ -794,6 +830,7 @@ void loop() {
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
   }
+#endif
 
 #if FREEINK_DEVICE_PAPERMONO
   // Paper Mono reports the PMIC power button as a one-tick click, so the held
