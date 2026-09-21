@@ -11,8 +11,8 @@
 // redirects the whole UiListActivity protocol (touch routing, swipe scroll,
 // screen sync) to the active tab's state. Buttons work on two levels: on the
 // tab band Up/Down move between tabs and Confirm (enterList) drops into the
-// rows; in the rows Up/Down walk the ring and Back (subclass) returns to the
-// band. The tab-bar chrome (pill styles, focused band wash) is shared verbatim
+// rows; in the rows Up/Down cycle the rows only and Back (subclass) returns to
+// the band. The tab-bar chrome (pill styles, focused band wash) is shared verbatim
 // via buildTabBar().
 //
 // Subclasses own the button semantics wholesale (handleButtons is pure here:
@@ -51,7 +51,7 @@ class UiTabListActivity : public UiListActivity {
   int ringPos() const;
   // ACTION_ROW lands as ring = row + 1, then activateIndex(row).
   void onRowAction(const freeink::ui::ActionEvent& event) override;
-  // Release walks the ring; continuous hold steps the tab.
+  // Up/Down: tabs on the band, rows in the list; a hold repeats the step.
   void navigateButtons() override;
   // Move to a ring position: tab bar rewinds the viewport, a row pulls the
   // viewport to itself.

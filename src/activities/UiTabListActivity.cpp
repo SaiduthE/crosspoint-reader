@@ -62,23 +62,24 @@ void UiTabListActivity::moveRingTo(const int ringIndex) {
 void UiTabListActivity::navigateButtons() {
   // Two levels, one pair of buttons: with the tab band focused (ring 0) Up/Down
   // move between tabs and Confirm drops into the list; inside the list they
-  // walk the rows (wrapping through the band, so Up from the first row lands on
-  // the tabs) and Back (subclass) returns to the band. Replaces the original
-  // "Confirm cycles the tabs" scheme, which read as a stuck Select on a
-  // four-button device. A hold repeats the same step.
-  const int ringSize = listCount() + 1;
-  const auto next = [this, ringSize] {
+  // cycle the rows only (last row wraps to the first, never up to the band) and
+  // Back (subclass) is the one way back to the tabs. The first cut wrapped
+  // through the band, and scrolling a long tab kept bouncing the focus onto the
+  // tab bar. Replaces the original "Confirm cycles the tabs" scheme, which read
+  // as a stuck Select on a four-button device. A hold repeats the same step.
+  const int rows = listCount();
+  const auto next = [this, rows] {
     if (ringPos() == 0) {
       stepTab(1);
-    } else {
-      moveRingTo(ButtonNavigator::nextIndex(ringPos(), ringSize));
+    } else if (rows > 0) {
+      moveRingTo(ButtonNavigator::nextIndex(ringPos() - 1, rows) + 1);
     }
   };
-  const auto previous = [this, ringSize] {
+  const auto previous = [this, rows] {
     if (ringPos() == 0) {
       stepTab(-1);
-    } else {
-      moveRingTo(ButtonNavigator::previousIndex(ringPos(), ringSize));
+    } else if (rows > 0) {
+      moveRingTo(ButtonNavigator::previousIndex(ringPos() - 1, rows) + 1);
     }
   };
   buttonNavigator.onNextRelease(next);
