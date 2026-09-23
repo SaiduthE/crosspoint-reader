@@ -18,6 +18,7 @@
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
 #include "home/RecentBooksActivity.h"
+#include "library/LibraryActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "network/UsbDriveActivity.h"
 #include "reader/ReaderActivity.h"
@@ -252,6 +253,15 @@ void ActivityManager::goToRecentBooks() {
   replaceActivity(std::make_unique<RecentBooksActivity>(renderer, mappedInput));
 }
 
+void ActivityManager::goToLibrary() {
+  auto activity = makeUniqueNoThrow<LibraryActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: Library activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();
   // Skip the server picker when there's only one server configured
@@ -298,7 +308,9 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
   if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
     const auto& activityName = currentActivity->name;
-    if (activityName == "FileBrowser") {
+    if (activityName == "Library") {
+      initialMenuItem = HomeMenuItem::LIBRARY;
+    } else if (activityName == "FileBrowser") {
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
     } else if (activityName == "RecentBooks") {
       initialMenuItem = HomeMenuItem::RECENTS;
