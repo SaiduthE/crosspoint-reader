@@ -236,7 +236,7 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "Classic" - The original Crosspoint theme
   - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
   - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
-  - "RoundedRaff" - A rounded theme with additional visual styling
+  - "RoundedRaff" (default) - A rounded theme with additional visual styling
 
 - **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
   

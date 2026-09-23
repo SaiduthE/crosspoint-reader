@@ -306,6 +306,10 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 }
 
 void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
+  // Leaving a book: clear the reader's ghosting with a clean first frame.
+  if (isReaderActivity()) {
+    cleanInitialRefresh = true;
+  }
   if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
     const auto& activityName = currentActivity->name;
     if (activityName == "Library") {
