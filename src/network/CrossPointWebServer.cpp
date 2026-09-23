@@ -21,13 +21,18 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
+#include "html/ConvertPageHtml.generated.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/css/appCss.generated.h"
 #include "html/js/appJs.generated.h"
+#include "html/js/bindery_appJs.generated.h"
+#include "html/js/bindery_coreJs.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "html/js/pdf_minJs.generated.h"
+#include "html/js/pdf_worker_minJs.generated.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
 
@@ -174,6 +179,28 @@ void CrossPointWebServer::begin() {
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
+
+  // Convert: manga, comics and books made ready on the phone, streamed to
+  // the card over the WebSocket upload. pdf.js (~380 KB gzipped) is only
+  // fetched when a PDF is added.
+  server->on("/convert", HTTP_GET, [this] {
+    PhonePage::sendStatic(*server, ConvertPageHtml, sizeof(ConvertPageHtml), ConvertPageHtmlETag, "text/html");
+  });
+  server->on("/js/bindery-core.js", HTTP_GET, [this] {
+    PhonePage::sendStatic(*server, bindery_coreJs, bindery_coreJsCompressedSize, bindery_coreJsETag,
+                          "application/javascript");
+  });
+  server->on("/js/bindery-app.js", HTTP_GET, [this] {
+    PhonePage::sendStatic(*server, bindery_appJs, bindery_appJsCompressedSize, bindery_appJsETag,
+                          "application/javascript");
+  });
+  server->on("/js/pdf.min.js", HTTP_GET, [this] {
+    PhonePage::sendStatic(*server, pdf_minJs, pdf_minJsCompressedSize, pdf_minJsETag, "application/javascript");
+  });
+  server->on("/js/pdf.worker.min.js", HTTP_GET, [this] {
+    PhonePage::sendStatic(*server, pdf_worker_minJs, pdf_worker_minJsCompressedSize, pdf_worker_minJsETag,
+                          "application/javascript");
+  });
 
   // Font management endpoints
   server->on("/fonts", HTTP_GET, [this] { handleFontsPage(); });

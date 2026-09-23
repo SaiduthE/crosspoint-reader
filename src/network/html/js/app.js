@@ -27,6 +27,7 @@
       '<a class="brand" href="/">e-Minimal</a>' +
       '<a href="/" data-page="home">Home</a>' +
       '<a href="/files" data-page="files">Files</a>' +
+      '<a href="/convert" data-page="convert">Convert</a>' +
       '<a href="/settings" data-page="settings">Settings</a>' +
       '<a href="/fonts" data-page="fonts">Fonts</a>' +
       '<div class="drawer-foot" id="drawerFoot"></div>' +
