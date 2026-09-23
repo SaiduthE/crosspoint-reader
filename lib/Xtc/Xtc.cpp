@@ -515,6 +515,8 @@ uint8_t Xtc::getBitDepth() const {
   return parser->getBitDepth();
 }
 
+bool Xtc::isRightToLeft() const { return loaded && parser && parser->getHeader().readDirection == 1; }
+
 size_t Xtc::loadPage(uint32_t pageIndex, uint8_t* buffer, size_t bufferSize) const {
   if (!loaded || !parser) {
     return 0;

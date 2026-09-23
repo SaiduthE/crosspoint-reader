@@ -133,6 +133,8 @@ void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen) 
 
 void HalDisplay::preconditionGrayscale() { einkDisplay.preconditionGrayscale(); }
 
+void HalDisplay::repeatLastRefresh() { einkDisplay.repeatLastRefresh(); }
+
 void HalDisplay::preconditionGrayscale(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
   einkDisplay.preconditionGrayscale(x, y, w, h);
 }

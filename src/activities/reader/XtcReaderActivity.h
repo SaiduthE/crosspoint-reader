@@ -10,6 +10,9 @@
 class XtcReaderActivity final : public ReaderActivity {
   std::shared_ptr<Xtc> xtc;
   uint32_t currentPage = 0;
+  // The page just shown was mostly ink: flash white before the next one.
+  bool prevPageDark = false;
+  static constexpr uint32_t DARK_PAGE_PERCENT = 45;
 
   enum class StatusBarOverlayPosition { Bottom, Top };
   struct StatusBarInfo {
@@ -19,6 +22,7 @@ class XtcReaderActivity final : public ReaderActivity {
   };
 
   void renderPage();
+  void openMenu();
   void openChapterSelection();
   void renderStatusBarOverlay(GfxRenderer& renderer, StatusBarOverlayPosition position) const;
   StatusBarInfo getStatusBarInfo() const;
@@ -40,6 +44,7 @@ class XtcReaderActivity final : public ReaderActivity {
   ~XtcReaderActivity() override = default;
 
   bool pageTurn(bool isForward) override;
+  bool isRightToLeft() const override { return xtc && xtc->isRightToLeft(); }
   bool skipPages(int amount) override;
   bool isAtEndOfBook() const override;
   void onReturnFromEndOfBook() override;

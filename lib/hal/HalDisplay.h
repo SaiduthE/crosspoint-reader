@@ -92,6 +92,8 @@ class HalDisplay {
   // are written; no-op on X4. See EInkDisplay::preconditionGrayscale.
   void preconditionGrayscale();
   void preconditionGrayscale(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+  // Run the last refresh again on what the frame memory holds (no reload).
+  void repeatLastRefresh();
 
   // Display the framebuffer as the base frame for a grayscale overlay that
   // follows. On X3, HALF fallback first requests a resync to match

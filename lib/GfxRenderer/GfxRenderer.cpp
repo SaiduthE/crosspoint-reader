@@ -2283,6 +2283,8 @@ bool GfxRenderer::displayGrayscaleBase(HalDisplay::GrayscaleMode mode, HalDispla
 
 void GfxRenderer::preconditionGrayscale() const { display.preconditionGrayscale(); }
 
+void GfxRenderer::repeatLastRefresh() const { display.repeatLastRefresh(); }
+
 void GfxRenderer::preconditionGrayscale(int x, int y, int w, int h) const {
   if (w <= 0 || h <= 0) return;
   // Rotate the logical rect's opposite corners to physical panel coords; the

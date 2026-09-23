@@ -368,6 +368,8 @@ class GfxRenderer {
   // frame is displayed and before the grayscale planes are written.
   void preconditionGrayscale() const;
   void preconditionGrayscale(int x, int y, int w, int h) const;
+  // Run the last refresh again on what the frame memory holds (no reload).
+  void repeatLastRefresh() const;
   // Display the framebuffer as the base frame for a grayscale overlay that
   // follows (X3: OEM differential base waveform; others: plain display with
   // `fallback`).

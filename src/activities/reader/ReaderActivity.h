@@ -27,6 +27,9 @@ class ReaderActivity : public Activity {
 
   virtual bool handleFormatInput() { return false; }
   virtual bool pageTurn(bool isForward) = 0;
+  // Right-to-left books (manga): the "previous" button and tap zone move
+  // forward, as the next page lies to the left.
+  virtual bool isRightToLeft() const { return false; }
   virtual bool skipPages(int amount) { return pageTurn(amount > 0); }
   virtual bool isAtEndOfBook() const = 0;
   virtual void onReturnFromEndOfBook() {}

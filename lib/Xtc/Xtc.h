@@ -73,6 +73,7 @@ class Xtc {
   uint16_t getPageWidth() const;
   uint16_t getPageHeight() const;
   uint8_t getBitDepth() const;  // 1 = XTC (1-bit), 2 = XTCH (2-bit)
+  bool isRightToLeft() const;   // header readDirection == 1 (manga)
 
   /**
    * Load page bitmap data
