@@ -11,6 +11,7 @@
 #include <Xtc.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -23,7 +24,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4;  // File Browser, Recents, File transfer, Settings
+  int count = 5;  // Library, My Files, Recents, File transfer, Settings
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -181,6 +182,9 @@ void HomeActivity::loop() {
     }
     const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
     switch (indexToMenuItem(menuIndex, hasOpdsServers)) {
+      case HomeMenuItem::LIBRARY:
+        onLibraryOpen();
+        break;
       case HomeMenuItem::FILE_BROWSER:
         onFileBrowserOpen();
         break;
@@ -306,29 +310,33 @@ void HomeActivity::render(RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings};
-
-  if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, Library);
-  }
-
+  // Order must match indexToMenuItem(). Fixed arrays: the menu has at most kMaxMenuItems rows.
+  constexpr int kMaxMenuItems = 7;
+  std::array<const char*, kMaxMenuItems> menuItems{};
+  std::array<UIIcon, kMaxMenuItems> menuIcons{};
+  int menuItemCount = 0;
+  const auto addMenuItem = [&](const char* label, const UIIcon icon) {
+    menuItems[menuItemCount] = label;
+    menuIcons[menuItemCount] = icon;
+    ++menuItemCount;
+  };
   if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
-    // Insert Continue Reading at the top if enabled in theme
-    menuItems.insert(menuItems.begin(), tr(STR_CONTINUE_READING));
-    menuIcons.insert(menuIcons.begin(), Book);
+    addMenuItem(tr(STR_CONTINUE_READING), Book);
   }
+  addMenuItem(tr(STR_LIBRARY), Library);
+  addMenuItem(tr(STR_BROWSE_FILES), Folder);
+  addMenuItem(tr(STR_MENU_RECENT_BOOKS), Recent);
+  if (hasOpdsServers) {
+    addMenuItem(tr(STR_OPDS_BROWSER), Wifi);
+  }
+  addMenuItem(tr(STR_FILE_TRANSFER), Transfer);
+  addMenuItem(tr(STR_SETTINGS_TITLE), Settings);
 
+  // The menu owns everything between the cover tile and the button hints.
+  const int menuTop = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
   GUI.drawButtonMenu(
-      renderer,
-      Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
-           pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
-                         metrics.homeMenuTopOffset + metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()),
-      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
+      renderer, Rect{0, menuTop, pageWidth, pageHeight - menuTop - metrics.buttonHintsHeight}, menuItemCount,
+      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - static_cast<int>(recentBooks.size()),
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 
@@ -348,6 +356,8 @@ void HomeActivity::render(RenderLock&&) {
 }
 
 void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
+
+void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 

@@ -640,9 +640,15 @@ int BaseTheme::getMenuRowHeight(const GfxRenderer&) const { return UITheme::getI
 void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
+  constexpr int rowHeight = BaseMetrics::values.menuRowHeight;
+  const int availableHeight = rect.height - BaseMetrics::values.verticalSpacing;
+  int rowStep = rowHeight + BaseMetrics::values.menuSpacing;
+  // Tighten the gap (rows never overlap) when all rows would not fit above the button hints.
+  if (buttonCount > 1 && (buttonCount - 1) * rowStep + rowHeight > availableHeight) {
+    rowStep = std::max(rowHeight, (availableHeight - rowHeight) / (buttonCount - 1));
+  }
   for (int i = 0; i < buttonCount; ++i) {
-    const int tileY = BaseMetrics::values.verticalSpacing + rect.y +
-                      static_cast<int>(i) * (BaseMetrics::values.menuRowHeight + BaseMetrics::values.menuSpacing);
+    const int tileY = BaseMetrics::values.verticalSpacing + rect.y + i * rowStep;
 
     const bool selected = selectedIndex == i;
 

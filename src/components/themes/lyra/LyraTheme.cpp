@@ -309,11 +309,15 @@ void LyraTheme::drawEmptyRecents(const GfxRenderer& renderer, const Rect rect) c
 void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
+  constexpr int rowHeight = LyraMetrics::values.menuRowHeight;
+  int rowStep = rowHeight + LyraMetrics::values.menuSpacing;
+  // Tighten the gap (rows never overlap) when all rows would not fit above the button hints.
+  if (buttonCount > 1 && (buttonCount - 1) * rowStep + rowHeight > rect.height) {
+    rowStep = std::max(rowHeight, (rect.height - rowHeight) / (buttonCount - 1));
+  }
   for (int i = 0; i < buttonCount; ++i) {
     int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
-    Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding,
-                         rect.y + i * (LyraMetrics::values.menuRowHeight + LyraMetrics::values.menuSpacing), tileWidth,
-                         LyraMetrics::values.menuRowHeight};
+    Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding, rect.y + i * rowStep, tileWidth, rowHeight};
 
     const bool selected = selectedIndex == i;
 
