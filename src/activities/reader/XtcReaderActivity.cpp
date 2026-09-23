@@ -13,6 +13,7 @@
 #include "ReaderActivity.h"
 #include "ReaderUtils.h"
 #include "XtcReaderChapterSelectionActivity.h"
+#include "XtcReaderMenuActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -32,6 +33,25 @@ bool XtcReaderActivity::loadBook() {
   return true;
 }
 
+void XtcReaderActivity::openMenu() {
+  const bool hasChapters = xtc->hasChapters() && !xtc->getChapters().empty();
+  startActivityForResult(
+      std::make_unique<XtcReaderMenuActivity>(renderer, mappedInput, xtc->getTitle(), static_cast<int>(currentPage) + 1,
+                                              static_cast<int>(xtc->getPageCount()), hasChapters),
+      [this](const ActivityResult& result) {
+        const int action = result.isCancelled ? -1 : std::get<MenuResult>(result.data).action;
+        if (action == static_cast<int>(XtcReaderMenuActivity::MenuAction::SELECT_CHAPTER)) {
+          openChapterSelection();
+          return;
+        }
+        if (action == static_cast<int>(XtcReaderMenuActivity::MenuAction::GO_HOME)) {
+          onGoHome();
+          return;
+        }
+        requestUpdate();  // redraw the page in any new cleanup mode
+      });
+}
+
 void XtcReaderActivity::openChapterSelection() {
   if (xtc && xtc->hasChapters() && !xtc->getChapters().empty()) {
     startActivityForResult(std::make_unique<XtcReaderChapterSelectionActivity>(renderer, mappedInput, xtc, currentPage),
@@ -49,10 +69,10 @@ bool XtcReaderActivity::handleFormatInput() {
     return false;
   }
 
-  // Enter chapter selection activity on Confirm release or touch menu gesture
+  // The reader menu on Confirm release or the touch menu gesture, as in EPUBs.
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
       ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
-    openChapterSelection();
+    openMenu();
     return true;
   }
   return false;
@@ -161,6 +181,7 @@ void XtcReaderActivity::renderPage() {
     return;
   }
 
+  const unsigned long tLoad = millis();
   size_t bytesRead = xtc->loadPage(currentPage, pageBuffer, pageBufferSize);
   if (bytesRead == 0) {
     LOG_ERR("XTR", "Failed to load page %lu: bufferSize=%lu bitDepth=%u error=%s", currentPage, pageBufferSize,
@@ -172,11 +193,31 @@ void XtcReaderActivity::renderPage() {
     return;
   }
 
+  // After a dark page even a GC16 leaves the old art faintly behind on this
+  // panel (judged 2026-09-22). "Manga Page Cleanup" (reader menu) picks the
+  // extra pass: repeat the new page's GC16 from frame memory (default,
+  // ~0.55 s), flash white first (the wake scrub's trick, ~0.73 s), or none.
+  const uint8_t cleanup = SETTINGS.pictureCleanup;
+  const bool afterDark = prevPageDark;
+  // 1-bit pages are dithered into fine dot patterns that ghost through one
+  // GC16 even between light pages (judged 2026-09-22); XTCH's true grays do
+  // not. So in Double mode a 1-bit page always gets the second pass, an XTCH
+  // page only after a dark one.
+  const bool doubleMode = cleanup != CrossPointSettings::PICTURE_CLEANUP_OFF &&
+                          cleanup != CrossPointSettings::PICTURE_CLEANUP_WHITE_FLASH;
+  const bool flashed = afterDark && cleanup == CrossPointSettings::PICTURE_CLEANUP_WHITE_FLASH;
+  const bool repeat = doubleMode && (afterDark || bitDepth == 1);
+  if (flashed) {
+    renderer.clearScreen();
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  }
+
   renderer.clearScreen();
 
   const uint16_t maxSrcY = pageHeight;
 
   if (bitDepth == 2) {
+    const unsigned long t0 = millis();
     const size_t planeSize = (static_cast<size_t>(pageWidth) * pageHeight + 7) / 8;
     const uint8_t* plane1 = pageBuffer;
     const uint8_t* plane2 = pageBuffer + planeSize;
@@ -192,86 +233,147 @@ void XtcReaderActivity::renderPage() {
       return (bit1 << 1) | bit2;
     };
 
-    for (uint16_t y = 0; y < pageHeight; y++) {
-      for (uint16_t x = 0; x < pageWidth; x++) {
-        if (getPixelValue(x, y) >= 1) {
-          renderer.drawPixel(x, y, true);
+    // In portrait, logical (x, y) lands at frame-buffer row panelHeight-1-x,
+    // byte y/8, MSB first -- exactly an XTH plane's layout (columns stored
+    // right to left, 8 vertical pixels a byte). A page the size of the panel
+    // therefore maps onto the frame buffer byte for byte, and each pass below
+    // is one bitwise loop instead of 2.6 M drawPixel calls that walk the
+    // column-major planes against the cache (~13 s a page on 1404x1872).
+    // Frame-buffer bit 1 = white. Pixel values: 0 white, 1 dark, 2 light, 3 black.
+    uint8_t* const fb = renderer.getFrameBuffer();
+    const bool direct = fb && renderer.getOrientation() == GfxRenderer::Orientation::Portrait &&
+                        renderer.getWriteTarget() == fb && pageHeight % 8 == 0 &&
+                        pageHeight == renderer.getDisplayWidth() && pageWidth == renderer.getDisplayHeight() &&
+                        colBytes == renderer.getDisplayWidthBytes();
+    enum class Pass { Base, Lsb, Msb };
+    auto fillPass = [&](const Pass pass) {
+      if (direct) {
+        for (size_t i = 0; i < planeSize; i++) {
+          const uint8_t a = plane1[i], b = plane2[i];
+          fb[i] = pass == Pass::Base ? static_cast<uint8_t>(~(a | b))
+                  : pass == Pass::Lsb ? static_cast<uint8_t>(~a & b)
+                                      : static_cast<uint8_t>(a ^ b);
+        }
+        return;
+      }
+      renderer.clearScreen(pass == Pass::Base ? 0xFF : 0x00);
+      for (uint16_t y = 0; y < pageHeight; y++) {
+        for (uint16_t x = 0; x < pageWidth; x++) {
+          const uint8_t pv = getPixelValue(x, y);
+          if (pass == Pass::Base ? pv >= 1 : pass == Pass::Lsb ? pv == 1 : (pv == 1 || pv == 2)) {
+            renderer.drawPixel(x, y, pass == Pass::Base);
+          }
         }
       }
-    }
+    };
 
-    if (pagesUntilFullRefresh <= 1) {
-      // Periodic ghost cleanup: scrub via the normal path, then run the
-      // settle flavor of the grayscale base pass (DTM planes are equal after
-      // the display sync, so only the gentle reinforcement cells fire).
-      // Combined-base panels (Paper Mono) instead defer the base so the gray
-      // planes below join it in one waveform.
-      if (renderer.grayscaleCapabilities().base == HalDisplay::GrayscaleBase::Combined) {
-        renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
-      } else {
-        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-        renderer.preconditionGrayscale();
+    fillPass(Pass::Base);
+    const unsigned long tBase = millis();
+
+    // Ink weight for the next page's white flash: black 3, dark 2, light 1.
+    if (direct) {
+      uint64_t ink = 0;
+      for (size_t i = 0; i < planeSize; i++) {
+        const uint8_t a = plane1[i], b = plane2[i];
+        ink += 3 * __builtin_popcount(a & b) + 2 * __builtin_popcount(~a & b & 0xFF) +
+               __builtin_popcount(a & ~b & 0xFF);
       }
-      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+      prevPageDark = ink > static_cast<uint64_t>(planeSize) * 8 * 3 * DARK_PAGE_PERCENT / 100;
     } else {
-      renderer.displayGrayscaleBase(HalDisplay::FAST_REFRESH);
-      pagesUntilFullRefresh--;
+      prevPageDark = false;
     }
 
-    renderer.clearScreen(0x00);
-    for (uint16_t y = 0; y < pageHeight; y++) {
-      for (uint16_t x = 0; x < pageWidth; x++) {
-        if (getPixelValue(x, y) == 1) {
-          renderer.drawPixel(x, y, false);
-        }
-      }
+    // Every picture page gets the ghost-clearing refresh. On a combined-base
+    // panel (this one) the base is only staged and the gray pass is the
+    // page's one refresh: HALF turns that from DU4 (differential, ghosts on
+    // art) into GC16, ~0.17 s more. Others scrub, then refine.
+    if (renderer.grayscaleCapabilities().base == HalDisplay::GrayscaleBase::Combined) {
+      renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
+    } else {
+      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      renderer.preconditionGrayscale();
     }
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+
+    const unsigned long tBaseShown = millis();
+
+    fillPass(Pass::Lsb);
     renderer.copyGrayscaleLsbBuffers();
-
-    renderer.clearScreen(0x00);
-    for (uint16_t y = 0; y < pageHeight; y++) {
-      for (uint16_t x = 0; x < pageWidth; x++) {
-        const uint8_t pv = getPixelValue(x, y);
-        if (pv == 1 || pv == 2) {
-          renderer.drawPixel(x, y, false);
-        }
-      }
-    }
+    fillPass(Pass::Msb);
     renderer.copyGrayscaleMsbBuffers();
+    const unsigned long tPlanes = millis();
 
     renderer.displayGrayBuffer();
+    if (repeat) renderer.repeatLastRefresh();
+    const unsigned long tGray = millis();
 
-    renderer.clearScreen();
-    for (uint16_t y = 0; y < pageHeight; y++) {
-      for (uint16_t x = 0; x < pageWidth; x++) {
-        if (getPixelValue(x, y) >= 1) {
-          renderer.drawPixel(x, y, true);
-        }
-      }
-    }
-
+    fillPass(Pass::Base);
     renderer.cleanupGrayscaleWithFrameBuffer();
 
     free(pageBuffer);
 
-    LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
+    LOG_INF("XTR", "Page %lu/%lu (2-bit, %s%s%s): load %lu ms, fill %lu, base %lu, planes %lu, gray %lu, cleanup %lu",
+            currentPage + 1, xtc->getPageCount(), direct ? "direct" : "per-pixel",
+            flashed  ? ", white flash first"
+            : repeat ? ", repeated"
+                     : "",
+            prevPageDark ? ", dark" : "",
+            t0 - tLoad, tBase - t0, tBaseShown - tBase, tPlanes - tBaseShown, tGray - tPlanes, millis() - tGray);
     return;
   } else {
     const size_t srcRowBytes = (pageWidth + 7) / 8;
 
-    for (uint16_t srcY = 0; srcY < maxSrcY; srcY++) {
-      const size_t srcRowStart = srcY * srcRowBytes;
+    // Bit 1 = white; everything else is ink.
+    uint64_t white = 0;
+    for (size_t i = 0; i < pageBufferSize; i++) white += __builtin_popcount(pageBuffer[i]);
+    const uint64_t total = static_cast<uint64_t>(srcRowBytes) * 8 * pageHeight;
+    prevPageDark = (total - white) * 100 > total * DARK_PAGE_PERCENT;
 
-      for (uint16_t srcX = 0; srcX < pageWidth; srcX++) {
-        const size_t srcByte = srcRowStart + srcX / 8;
-        const size_t srcBit = 7 - (srcX % 8);
-        const bool isBlack = !((pageBuffer[srcByte] >> srcBit) & 1);
+    // XTG is row-major (8 horizontal pixels a byte, MSB = left); the portrait
+    // frame buffer holds column x at row panelHeight-1-x, 8 vertical pixels a
+    // byte (MSB = top). Both use bit 1 = white. A panel-sized page is copied
+    // by transposing 8x8 blocks straight into place: ~41 K blocks instead of
+    // 2.6 M drawPixel calls (0.5-2 s a page).
+    const unsigned long tFill = millis();
+    uint8_t* const fb = renderer.getFrameBuffer();
+    const size_t fbRowBytes = renderer.getDisplayWidthBytes();
+    const bool direct = fb && renderer.getOrientation() == GfxRenderer::Orientation::Portrait &&
+                        renderer.getWriteTarget() == fb && pageHeight % 8 == 0 &&
+                        pageHeight == renderer.getDisplayWidth() && pageWidth == renderer.getDisplayHeight() &&
+                        fbRowBytes * 8 == pageHeight;
+    if (direct) {
+      for (uint16_t y0 = 0; y0 < pageHeight; y0 += 8) {
+        const uint8_t* src = pageBuffer + static_cast<size_t>(y0) * srcRowBytes;
+        const size_t fbByte = y0 / 8;
+        for (size_t bx = 0; bx < srcRowBytes; bx++) {
+          uint8_t s[8];
+          for (int k = 0; k < 8; k++) s[k] = src[k * srcRowBytes + bx];
+          for (int j = 0; j < 8; j++) {
+            const size_t x = bx * 8 + j;
+            if (x >= pageWidth) break;  // row padding in the last byte
+            uint8_t t = 0;
+            for (int k = 0; k < 8; k++) t |= static_cast<uint8_t>(((s[k] >> (7 - j)) & 1) << (7 - k));
+            fb[(pageWidth - 1 - x) * fbRowBytes + fbByte] = t;
+          }
+        }
+      }
+    } else {
+      for (uint16_t srcY = 0; srcY < maxSrcY; srcY++) {
+        const size_t srcRowStart = srcY * srcRowBytes;
 
-        if (isBlack) {
-          renderer.drawPixel(srcX, srcY, true);
+        for (uint16_t srcX = 0; srcX < pageWidth; srcX++) {
+          const size_t srcByte = srcRowStart + srcX / 8;
+          const size_t srcBit = 7 - (srcX % 8);
+          const bool isBlack = !((pageBuffer[srcByte] >> srcBit) & 1);
+
+          if (isBlack) {
+            renderer.drawPixel(srcX, srcY, true);
+          }
         }
       }
     }
+    LOG_DBG("XTR", "Page %lu/%lu 1-bit %s: load %lu ms, fill %lu ms", currentPage + 1, xtc->getPageCount(),
+            direct ? "direct" : "per-pixel", tFill - tLoad, millis() - tFill);
   }
 
   free(pageBuffer);
@@ -282,9 +384,18 @@ void XtcReaderActivity::renderPage() {
     renderStatusBarOverlay(renderer, StatusBarOverlayPosition::Bottom);
   }
 
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  // XTC pages are pictures (manga, comics). The differential DU refresh
+  // leaves the last page's art behind on the next, so every page gets the
+  // GC16 clear (HALF on this panel, ~0.23 s more than DU).
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  if (repeat) renderer.repeatLastRefresh();
+  pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
 
-  LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
+  LOG_INF("XTR", "Page %lu/%lu (1-bit%s%s)", currentPage + 1, xtc->getPageCount(),
+          flashed  ? ", white flash first"
+          : repeat ? ", repeated"
+                   : "",
+          prevPageDark ? ", dark" : "");
 }
 
 bool XtcReaderActivity::pageTurn(bool isForward) {

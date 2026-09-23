@@ -50,6 +50,17 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     XTC_STATUS_BAR_TOP = 2,
     XTC_STATUS_BAR_MODE_COUNT
   };
+  // How XTC/XTCH picture pages clear a dark page left behind. Every page gets
+  // a GC16; after a page that was mostly ink one more pass follows. Judged on
+  // the glass 2026-09-22: double refresh is the steadiest and quick; GLR16 and
+  // GLD16 in place of GC16 were smooth but left art behind (they are made for
+  // gray text on white), so they were dropped. Stored 3/4 read as DOUBLE.
+  enum PICTURE_CLEANUP {
+    PICTURE_CLEANUP_OFF = 0,          // GC16 only
+    PICTURE_CLEANUP_DOUBLE = 1,       // dark page: repeat the GC16 on the new page
+    PICTURE_CLEANUP_WHITE_FLASH = 2,  // dark page: white GC16 first
+    PICTURE_CLEANUP_COUNT
+  };
 
   enum STATUS_BAR_CLOCK_MODE {
     STATUS_BAR_CLOCK_HIDE = 0,
@@ -254,6 +265,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t sleepTimeoutMinutes = 10;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
+  uint8_t pictureCleanup = PICTURE_CLEANUP_DOUBLE;
   uint8_t hyphenationEnabled = 0;
 
   // Reader screen margin settings
