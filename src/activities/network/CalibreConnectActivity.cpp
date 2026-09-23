@@ -4,6 +4,7 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <LibraryIndex.h>
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
@@ -52,6 +53,7 @@ void CalibreConnectActivity::onEnter() {
 
 void CalibreConnectActivity::onExit() {
   Activity::onExit();
+  library::markStale();  // books may have been sent
 
   MDNS.end();
 

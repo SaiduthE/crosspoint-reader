@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryIndex.h>
 #include <Memory.h>
 #include <Utf8.h>
 
@@ -285,6 +286,7 @@ void FileBrowserActivity::activateSelected(const bool forceDelete) {
         LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
         if (removeDirFile(fullPath)) {
           LOG_DBG("FileBrowser", "Deleted successfully");
+          library::markStale();
           {
             // buildScreen() reads the row caches on the render task; see loop().
             RenderLock lock(*this);

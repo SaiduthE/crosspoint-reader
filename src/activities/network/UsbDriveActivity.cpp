@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryIndex.h>
 
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
@@ -35,6 +36,7 @@ void UsbDriveActivity::onEnter() {
 
 void UsbDriveActivity::onExit() {
   if (!restartRequested) Storage.endUsbDrive();
+  library::markStale();  // the host may have changed anything on the card
   Activity::onExit();
 }
 

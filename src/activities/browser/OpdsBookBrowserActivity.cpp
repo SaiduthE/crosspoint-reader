@@ -6,6 +6,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryIndex.h>
 #include <Logging.h>
 #include <OpdsStream.h>
 #include <WiFi.h>
@@ -546,6 +547,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   if (result == HttpDownloader::OK) {
     clearBookCache(filename);
+    library::markStale();
     state = BrowserState::LOADING;
     statusMessage = tr(STR_LOADING);
     fetchFeed(currentPath);

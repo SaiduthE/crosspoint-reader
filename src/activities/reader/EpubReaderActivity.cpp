@@ -10,6 +10,7 @@
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryIndex.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <esp_system.h>
@@ -133,6 +134,7 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
     LOG_ERR("ERS", "Failed to move finished book to '/Read' folder");
     return;
   }
+  library::markStale();
 
   const std::string newCachePath = "/.crosspoint/epub_" + std::to_string(std::hash<std::string>{}(dstPath));
   if (!oldCachePath.empty() && Storage.exists(oldCachePath.c_str())) {

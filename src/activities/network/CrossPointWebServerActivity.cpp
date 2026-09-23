@@ -5,6 +5,7 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <LibraryIndex.h>
 #include <WiFi.h>
 
 #include <cstddef>
@@ -99,6 +100,7 @@ void CrossPointWebServerActivity::onEnter() {
 
 void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
+  library::markStale();  // uploads, renames and deletes change the SD content
 
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 

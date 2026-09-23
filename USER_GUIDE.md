@@ -37,6 +37,7 @@ Welcome to the **CrossPoint** firmware. This guide outlines the hardware control
       - [Cover settings](#cover-settings)
       - [Custom images](#custom-images)
     - [3.8 Custom Fonts (SD Card)](#38-custom-fonts-sd-card)
+    - [3.9 Library Screen](#39-library-screen)
   - [4. Reading Mode](#4-reading-mode)
     - [Page Turning](#page-turning)
     - [Chapter Navigation](#chapter-navigation)
@@ -566,6 +567,27 @@ There are three ways to install fonts:
 Once installed, custom fonts appear in **Settings → Reader → Font Family** alongside the built-in fonts.
 
 See [docs/sd-card-fonts.md](./docs/sd-card-fonts.md) for full installation details and SD card folder structure.
+
+### 3.9 Library Screen
+
+The Library shows every book on the SD card (EPUB, XTC/XTCH, TXT and Markdown) as a grid of covers, sorted by path, in three tabs: **Books**, **Manga** and **Comics**. Covers and titles are read from the books themselves the first time a page of the grid is shown, so the first visit to a page can take a few seconds.
+
+Books are sorted into tabs by the name of the folder they are in (or any folder above it). A folder name counts when it is one of the keywords below, on its own or followed by a space, `-`, `_` or `(` — so `Manga`, `manga-2024` and `Comics (DC)` all work. Letter case does not matter, and the nearest matching folder wins. Everything else goes to **Books**.
+
+| Tab | Folder names |
+| --- | --- |
+| Manga | `manga`, `mangas`, `manhwa`, `manhua` |
+| Comics | `comic`, `comics`, `bd`, `graphic novels` |
+| Books | `book`, `books`, `ebook`, `ebooks`, `e-books`, `novels` |
+
+For example, `/Manga/One Piece/Volume 01.epub` appears under **Manga**, and `/Books/Manga Guide.epub` stays under **Books**.
+
+* **Move:** **Left** / **Right** move one book, **Side Up** / **Side Down** move one row. Moving up from the first row selects the tabs; **Left** / **Right** then switch tabs and **Side Down** returns to the grid.
+* **Open:** Press **Confirm** to open the selected book.
+* **More options:** Hold **Confirm** for **Open**, **Show in My Files** and **Rescan library**.
+* **Touch:** Tap a tab or a cover; swipe up or down to change page.
+
+The library is built on the first visit and checked again in the background after a restart, a file transfer, a download or a deletion. The index lives in `/.crosspoint/library/`; deleting that folder simply rebuilds it. Up to 4,000 books are indexed.
 
 ---
 

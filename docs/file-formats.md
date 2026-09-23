@@ -380,3 +380,70 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## `library/index.bin`
+
+### Version 1
+
+`/.crosspoint/library/index.bin` is the Library screen's index of every book on
+the SD card, written by `LibraryScanner` and read by `LibraryIndex`
+(`lib/LibraryIndex/LibraryFormat.h`). It is a derived cache: a missing or
+invalid file is rebuilt by a full scan, and a scan whose content hash matches
+the existing file leaves it untouched. A rescan writes `index.new` and renames
+it over `index.bin`; the staging files `stack.tmp`, `rec0-2.tmp` and
+`blob.tmp` in the same folder exist only while a scan runs.
+
+Layout: a 64-byte header, `total` fixed 128-byte records grouped by category
+(Books, then Manga, then Comics; natural path order within each), then a blob
+of raw path bytes. Item `i` of category `c` is at
+`recordStart + (sum(count[0..c)) + i) * 128`. Readers validate the header
+against the file size before trusting any offset.
+
+Record flags: bit 0 `META_DONE` (title/author came from the book's metadata),
+bit 1 `THUMB_DONE` (cover generation was attempted), bit 2 `THUMB_OK`
+(`thumb_144.bmp` exists in the book's cache dir). `cacheKey` is the
+`std::hash<std::string>` of the path (32-bit on device), i.e. the `<hash>` in
+`/.crosspoint/epub_<hash>/` and `/.crosspoint/xtc_<hash>/`. `contentHash` is
+FNV-1a over every record's path bytes and file size, in index order.
+
+ImHex pattern:
+
+```c++
+import std.mem;
+
+struct LibraryHeader {
+    char magic[4] [[comment("\"CPLB\"")]];
+    u8 version [[comment("1")]];
+    u8 reserved0;
+    u16 flags [[comment("bit 0: truncated at 4000 books / 20000 entries, bit 1: a folder was sorted in batches")]];
+    u16 count[3] [[comment("Books, Manga, Comics")]];
+    u16 total;
+    u32 recordStart [[comment("64")]];
+    u32 blobStart [[comment("recordStart + total * 128")]];
+    u32 blobLen;
+    u32 selfSize [[comment("blobStart + blobLen == file size")]];
+    u32 contentHash [[comment("FNV-1a over path bytes + u32 file size per record")]];
+    u32 lastScanMs [[comment("millis() when the scan finished")]];
+    u8 reserved[24];
+};
+
+enum BookFormat : u8 { EPUB = 0, XTC = 1, TXT = 2, MARKDOWN = 3 };
+
+struct LibraryRecord {
+    u32 pathOff [[comment("Offset into the path blob")]];
+    u16 pathLen;
+    BookFormat format;
+    u8 flags [[comment("bit 0: META_DONE, bit 1: THUMB_DONE, bit 2: THUMB_OK")]];
+    u32 fileSize;
+    u32 cacheKey [[comment("std::hash of the path; epub_<hash> / xtc_<hash>")]];
+    u8 titleLen;
+    u8 authorLen;
+    char title[72] [[comment("NUL-terminated UTF-8")]];
+    char author[36] [[comment("NUL-terminated UTF-8")]];
+    u8 reserved[2];
+};
+
+LibraryHeader header @ 0x00;
+LibraryRecord records[header.total] @ header.recordStart;
+char paths[header.blobLen] @ header.blobStart;
+```
