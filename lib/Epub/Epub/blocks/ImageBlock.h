@@ -28,6 +28,16 @@ class ImageBlock final : public Block {
   // render completes so nothing stays resident between pages.
   static void releaseRenderCache();
 
+  // A decode that has just produced the whole 2bpp payload hands it here rather
+  // than letting the next pass fetch it again. On success the slot takes
+  // ownership of `payload` (malloc/heap_caps_malloc memory) and the caller must
+  // not free it; on failure the slot is already spoken for by another image on
+  // this page and the caller still owns it. This is what makes an image page
+  // survive a card that refuses the .pxc write: the payload never reached SD,
+  // but the remaining passes still render from RAM instead of re-decoding.
+  // Released by releaseRenderCache() with everything else.
+  static bool adoptRenderCache(const std::string& cachePath, uint8_t* payload, uint16_t width, uint16_t height);
+
   // Lazy extraction hook: the section build only header-probes images for their
   // dimensions; the file at imagePath is extracted out of the book on first
   // render, via this callback (function pointer + context, not std::function —

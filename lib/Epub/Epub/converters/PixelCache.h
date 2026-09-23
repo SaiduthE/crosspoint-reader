@@ -2,11 +2,14 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <esp_heap_caps.h>
 #include <stdint.h>
 
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
+#include "Epub/blocks/ImageBlock.h"
 
 // Streaming cache writer for 2-bit pixels (4 levels). Packs 4 pixels per byte,
 // MSB first.
@@ -39,6 +42,8 @@ struct PixelCache {
   HalFile file;
   std::string cachePathStr;
   bool ok;
+  bool whole;    // band == the whole image, held in PSRAM
+  bool hasFile;  // the .pxc is open and its header is written
 
   PixelCache()
       : buffer(nullptr),
@@ -51,12 +56,19 @@ struct PixelCache {
         bandRows(0),
         bandStart(0),
         flushedRows(0),
-        ok(false) {}
+        ok(false),
+        whole(false),
+        hasFile(false) {}
   PixelCache(const PixelCache&) = delete;
   PixelCache& operator=(const PixelCache&) = delete;
 
   static constexpr int MIN_BAND_ROWS = 16;
   static constexpr size_t MAX_BAND_BYTES = 24 * 1024;  // band working-set ceiling
+  // Whole-image mode ceilings. A 1404x1872 page image packs to ~640 KB; the
+  // reserve leaves the IT8951's three PSRAM planes and the framebuffers alone.
+  static constexpr size_t MAX_WHOLE_BYTES = 1024 * 1024;
+  static constexpr size_t WHOLE_PSRAM_RESERVE = 1024 * 1024;
+  static constexpr size_t WRITE_SLICE = 32 * 1024;
 
   // Open the cache file, write the header, and allocate a band buffer big enough
   // to hold the tallest single decode block (maxBlockDstRows output rows).
@@ -69,7 +81,32 @@ struct PixelCache {
     bandStart = 0;
     flushedRows = 0;
     ok = false;
+    whole = false;
+    hasFile = false;
 
+    // Whole-image mode. The streaming band above exists because the full
+    // payload will not fit RAM -- true of the internal heap, false of PSRAM,
+    // where a 1165x1820 page image is ~520 KB against ~6.6 MB free. When it
+    // fits, the band IS the image and three things follow: nothing is ever
+    // evicted, so advanceTo() has no work; the file is written as one
+    // sequential burst instead of `height` separate ~300-byte row writes, which
+    // is far kinder to a marginal SD bus; and the payload is handed to
+    // ImageBlock's render slot at the end, so the remaining passes of this page
+    // render neither re-read nor -- the point -- re-decode it, even when the
+    // card refuses the write outright.
+    const size_t wholeBytes = (size_t)(h + 1) * bytesPerRow;
+    if (h > 0 && bytesPerRow > 0 && wholeBytes <= MAX_WHOLE_BYTES &&
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > wholeBytes + WHOLE_PSRAM_RESERVE) {
+      buffer = (uint8_t*)heap_caps_malloc(wholeBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (buffer) {
+        memset(buffer, 0, wholeBytes);
+        bandRows = h;
+        zeroRow = buffer + (size_t)h * bytesPerRow;
+        whole = true;
+      }
+    }
+
+    if (!whole) {
     int wantRows = maxBlockDstRows + 2;
     if (wantRows < MIN_BAND_ROWS) wantRows = MIN_BAND_ROWS;
     if (wantRows > h) wantRows = h;
@@ -95,24 +132,34 @@ struct PixelCache {
     }
     memset(buffer, 0, bufSize);
     zeroRow = buffer + (size_t)bandRows * bytesPerRow;
+    }
 
-    if (!Storage.openFileForWrite("IMG", cachePath, file)) {
+    cachePathStr = cachePath;
+    if (Storage.openFileForWrite("IMG", cachePath, file)) {
+      const uint16_t w16 = (uint16_t)w;
+      const uint16_t h16 = (uint16_t)h;
+      if (file.write(&w16, 2) == 2 && file.write(&h16, 2) == 2) {
+        hasFile = true;
+      } else {
+        LOG_ERR("IMG", "Failed to write cache header: %s", cachePath.c_str());
+        abort();
+      }
+    } else {
       LOG_ERR("IMG", "Failed to open cache file for writing: %s", cachePath.c_str());
+    }
+
+    // Streaming has nowhere to put its rows without the file. Whole-image mode
+    // does: it can still fill the render slot from PSRAM and spare every later
+    // pass the decode, so a card that will not take the write costs the
+    // on-disk cache and nothing else.
+    if (!hasFile && !whole) {
       free(buffer);
       buffer = nullptr;
       return false;
     }
-    cachePathStr = cachePath;
 
-    uint16_t w16 = (uint16_t)w;
-    uint16_t h16 = (uint16_t)h;
-    if (file.write(&w16, 2) != 2 || file.write(&h16, 2) != 2) {
-      LOG_ERR("IMG", "Failed to write cache header: %s", cachePath.c_str());
-      abort();
-      return false;
-    }
-
-    LOG_DBG("IMG", "Cache stream started: %s (%dx%d, band %d rows)", cachePath.c_str(), w, h, bandRows);
+    LOG_DBG("IMG", "Cache stream started: %s (%dx%d, %s %d rows%s)", cachePath.c_str(), w, h,
+            whole ? "whole" : "band", bandRows, hasFile ? "" : ", PSRAM only");
     ok = true;
     return true;
   }
@@ -122,6 +169,7 @@ struct PixelCache {
   // in which case the caller must stop caching for the rest of the decode.
   bool advanceTo(int newTopRow) {
     if (!ok) return false;
+    if (whole) return true;  // the band is the image: no row is ever evicted
     if (newTopRow <= bandStart) return true;
     if (newTopRow > height) newTopRow = height;
 
@@ -147,6 +195,7 @@ struct PixelCache {
       abort();
       return false;
     }
+    if (whole) return finalizeWhole();
     for (int r = flushedRows; r < height; ++r) {
       const int idx = r - bandStart;
       const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
@@ -161,6 +210,38 @@ struct PixelCache {
             4 + bytesPerRow * height);
     ok = false;  // file handed off; nothing left to clean up
     return true;
+  }
+
+  // Whole-image mode: write the payload in one sequential burst, then hand it
+  // to the render slot. The handoff happens whether or not the write landed --
+  // losing the on-card cache must not cost this page render its decode.
+  bool finalizeWhole() {
+    const size_t payload = (size_t)bytesPerRow * height;
+    bool written = hasFile;
+    for (size_t done = 0; done < payload && written;) {
+      const size_t want = (payload - done < WRITE_SLICE) ? (payload - done) : WRITE_SLICE;
+      if (file.write(buffer + done, want) != want) {
+        LOG_ERR("IMG", "Cache write error at byte %u of %u", (unsigned)done, (unsigned)payload);
+        written = false;
+        break;
+      }
+      done += want;
+    }
+    if (written) {
+      file.close();
+      LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,
+              4 + bytesPerRow * height);
+    } else {
+      abort();  // drop the partial file; the payload below stands in for it
+    }
+    if (ImageBlock::adoptRenderCache(cachePathStr, buffer, (uint16_t)width, (uint16_t)height)) {
+      buffer = nullptr;  // ownership passed to the slot; the destructor must not free it
+      zeroRow = nullptr;
+      LOG_DBG("IMG", "Payload kept in PSRAM (%u KB) - no later pass re-decodes",
+              (unsigned)(payload / 1024));
+    }
+    ok = false;
+    return written;
   }
 
   // Drop a partial/failed cache so a later decode re-creates it cleanly.
