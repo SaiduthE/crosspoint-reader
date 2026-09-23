@@ -6,6 +6,7 @@
 #include <I18n.h>
 #include <WiFi.h>
 
+#include "FirmwareIdentity.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
@@ -14,7 +15,7 @@
 #include "util/TaskWatchdog.h"
 
 namespace {
-constexpr const char* HOSTNAME = "crosspoint";
+constexpr const char* HOSTNAME = FIRMWARE_HOSTNAME;
 }  // namespace
 
 void CalibreConnectActivity::onEnter() {

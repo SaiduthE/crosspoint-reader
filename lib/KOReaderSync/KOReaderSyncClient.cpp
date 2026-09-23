@@ -13,8 +13,13 @@
 int KOReaderSyncClient::lastHttpCode = 0;
 
 namespace {
-// Device identifier for CrossPoint reader
+// Device identifier for CrossPoint reader. A renamed build reports its own
+// product name; the device ID stays so existing sync records keep matching.
+#ifdef FIRMWARE_PRODUCT_NAME
+constexpr char DEVICE_NAME[] = FIRMWARE_PRODUCT_NAME;
+#else
 constexpr char DEVICE_NAME[] = "CrossPoint";
+#endif
 constexpr char DEVICE_ID[] = "crosspoint-reader";
 
 // wolfSSL uses the default allocator, which can use PSRAM on supported builds.
