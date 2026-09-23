@@ -5,6 +5,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Serialization.h>
+#include <esp_heap_caps.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -101,19 +102,40 @@ void rememberImageFailure(const std::string& path) {
 // across page turns.
 constexpr size_t PXC_CHUNK_SHIFT = 14;  // 16 KB chunks
 constexpr size_t PXC_CHUNK_SIZE = 1u << PXC_CHUNK_SHIFT;
-constexpr size_t PXC_MAX_CHUNKS = 6;  // 96 KB: a full-screen 2bpp image
+constexpr size_t PXC_MAX_CHUNKS = 6;  // 96 KB: a full-screen 2bpp image on a small panel
 constexpr size_t PXC_HEAP_RESERVE = 24 * 1024;
 constexpr size_t PXC_MAX_ALLOC_RESERVE = 8 * 1024;
 // Rows can straddle a chunk boundary; they are reassembled into a stack
-// buffer. (screenWidth + 3) / 4 caps at 200 B for an 800px panel.
-constexpr int PXC_MAX_BYTES_PER_ROW = 208;
+// buffer. (screenWidth + 3) / 4 is 200 B on an 800px panel and 351 B on
+// e-Minimal's 1404px portrait; 480 B covers anything up to 1920px.
+constexpr int PXC_MAX_BYTES_PER_ROW = 480;
+
+// PSRAM slot. On a 1404x1872 panel a full-page image is ~640 KB of 2bpp
+// payload: seven times the chunked slot's 96 KB ceiling, and more than twice
+// the whole internal heap. Both gates above rejected every cover on e-Minimal,
+// so the slot never once claimed one and all ~13 passes streamed it off SD --
+// which is exactly the cost the slot exists to remove. PSRAM has ~6.6 MB free
+// mid-render, so the payload goes there in a single block: no chunk straddle,
+// no row reassembly, and every later pass touches no storage at all. The
+// reserve leaves room for the IT8951's three PSRAM planes (~321 KB each) and
+// the framebuffers.
+constexpr size_t PXC_MAX_PSRAM_PAYLOAD = 1024 * 1024;
+constexpr size_t PXC_PSRAM_RESERVE = 1024 * 1024;
+// Fill the block in slices, so a 640 KB payload is not one enormous transfer
+// holding the storage mutex.
+constexpr size_t PXC_READ_SLICE = 32 * 1024;
 
 std::unique_ptr<uint8_t[]> pxcChunks[PXC_MAX_CHUNKS];
+uint8_t* pxcBlock = nullptr;  // contiguous PSRAM payload; preferred when it fits
 uint64_t pxcSlotHash = 0;
 uint16_t pxcSlotWidth = 0;
 uint16_t pxcSlotHeight = 0;
 
 void releasePxcSlot() {
+  if (pxcBlock) {
+    heap_caps_free(pxcBlock);
+    pxcBlock = nullptr;
+  }
   for (auto& chunk : pxcChunks) chunk.reset();
   pxcSlotHash = 0;
   pxcSlotWidth = 0;
@@ -121,6 +143,7 @@ void releasePxcSlot() {
 }
 
 const uint8_t* pxcRowPtr(size_t rowStart, int bytesPerRow, uint8_t* tempRow) {
+  if (pxcBlock) return pxcBlock + rowStart;  // contiguous: no row can straddle
   const size_t chunk = rowStart >> PXC_CHUNK_SHIFT;
   const size_t offset = rowStart & (PXC_CHUNK_SIZE - 1);
   if (offset + bytesPerRow <= PXC_CHUNK_SIZE) {
@@ -139,7 +162,33 @@ bool loadPxcSlot(uint64_t cacheHash, HalFile& cacheFile, uint16_t cachedWidth, u
   if (bytesPerRow > PXC_MAX_BYTES_PER_ROW) {
     return false;
   }
-  size_t remaining = (size_t)bytesPerRow * cachedHeight;
+  const size_t payload = (size_t)bytesPerRow * cachedHeight;
+  if (payload == 0) {
+    return false;
+  }
+
+  // PSRAM first, in one block, whatever the image size.
+  if (payload <= PXC_MAX_PSRAM_PAYLOAD &&
+      heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > payload + PXC_PSRAM_RESERVE) {
+    pxcBlock = static_cast<uint8_t*>(heap_caps_malloc(payload, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (pxcBlock) {
+      for (size_t done = 0; done < payload;) {
+        const size_t want = (payload - done < PXC_READ_SLICE) ? (payload - done) : PXC_READ_SLICE;
+        if (cacheFile.read(pxcBlock + done, want) != static_cast<int>(want)) {
+          releasePxcSlot();
+          return false;
+        }
+        done += want;
+      }
+      pxcSlotHash = cacheHash;
+      pxcSlotWidth = cachedWidth;
+      pxcSlotHeight = cachedHeight;
+      return true;
+    }
+  }
+
+  // No PSRAM, or it is spoken for: the chunked internal-heap slot, unchanged.
+  size_t remaining = payload;
   const size_t chunkCount = (remaining + PXC_CHUNK_SIZE - 1) >> PXC_CHUNK_SHIFT;
   if (chunkCount == 0 || chunkCount > PXC_MAX_CHUNKS) {
     return false;
@@ -222,7 +271,8 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   // images take the streaming path below, unchanged from pre-cache behavior.
   if (pxcSlotHash == 0 && loadPxcSlot(cacheHash, cacheFile, cachedWidth, cachedHeight, bytesPerRow)) {
     renderRowsFromPxcSlot(renderer, x, y);
-    LOG_DBG("IMG", "Cache render complete (payload now in RAM)");
+    LOG_DBG("IMG", "Payload now in %s (%u KB) - later passes skip SD", pxcBlock ? "PSRAM" : "heap",
+            (unsigned)(((size_t)bytesPerRow * cachedHeight) / 1024));
     return true;
   }
 
@@ -307,6 +357,19 @@ bool ImageBlock::needsDecode() const { return !imageFailedThisRender(imagePath) 
 void ImageBlock::clearRenderFailures() { failedImageCount = 0; }
 
 void ImageBlock::releaseRenderCache() { releasePxcSlot(); }
+
+bool ImageBlock::adoptRenderCache(const std::string& cachePath, uint8_t* payload, uint16_t width, uint16_t height) {
+  if (!payload || width == 0 || height == 0) return false;
+  // Same rule as the read path: only an EMPTY slot is claimed, so the first
+  // image on a page owns it for the whole render and a second image cannot
+  // evict the first halfway through.
+  if (pxcSlotHash != 0) return false;
+  pxcBlock = payload;
+  pxcSlotHash = imagePathHash(cachePath);
+  pxcSlotWidth = width;
+  pxcSlotHeight = height;
+  return true;
+}
 
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y) const {
   renderer.fillRect(x, y, width, height, true);
