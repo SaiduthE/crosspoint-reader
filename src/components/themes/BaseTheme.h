@@ -118,6 +118,10 @@ struct ThemeMetrics {
   int controlRadius;
   int sheetRadius;
   int capsuleRadius;
+
+  // Library cover cards sit on a LightGray rounded card (RoundedRaff) instead
+  // of the plain page background.
+  bool coverCardFill = false;
 };
 
 enum UIIcon {
@@ -212,7 +216,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .textFieldLineEndOffset = 0,
                                  .controlRadius = 0,
                                  .sheetRadius = 0,
-                                 .capsuleRadius = 0};
+                                 .capsuleRadius = 0,
+                                 .coverCardFill = false};
 }
 
 class BaseTheme {

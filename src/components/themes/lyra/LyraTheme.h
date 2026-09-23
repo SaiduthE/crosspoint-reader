@@ -77,7 +77,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .textFieldLineEndOffset = 0,
                                  .controlRadius = 6,
                                  .sheetRadius = 6,
-                                 .capsuleRadius = 6};
+                                 .capsuleRadius = 6,
+                                 .coverCardFill = false};
 }
 
 class LyraTheme : public BaseTheme {

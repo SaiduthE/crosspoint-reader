@@ -4,6 +4,13 @@
 
 #include "activities/UiListActivity.h"
 
+// The theme-driven tab band (pill style, focused band wash, divider) taken off
+// the top of the screen's content area. Shared by UiTabListActivity and tab
+// screens that are not lists (Library). `focused` = the selection is on the
+// tab band itself.
+void buildTabBand(UiAppHost::UiScreen& screen, const MappedInputManager& input, const char* const* labels, int count,
+                  int active, bool focused, freeink::ui::ActionId action);
+
 // UiListActivity variant for screens with a tab band above the list (Settings,
 // Text Settings). Navigation is a ring: position 0 is the tab bar, 1..N are
 // the list rows, so props.selectedIndex = ring - 1 (-1 = tab band focused).

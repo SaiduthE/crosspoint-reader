@@ -108,24 +108,33 @@ void UiTabListActivity::syncTabListViewport(UiScreen& screen, fui::ListProps& pr
 }
 
 void UiTabListActivity::buildTabBar(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-
-  // Tabs. The selected pill dims to a dither when the selection is down in
-  // the list (the legacy focused/unfocused tab distinction).
   // Stack array, not a heap vector: this runs on every render and the tab
   // count is small and fixed.
   constexpr int MAX_TABS = 8;
   const int count = tabCount() < MAX_TABS ? tabCount() : MAX_TABS;
-  fui::TabItem tabs[MAX_TABS];
-  for (int i = 0; i < count; i++) {
-    tabs[i].label = tabLabel(i);
-    tabs[i].value = static_cast<int16_t>(i);
-    tabs[i].selected = activeTab() == i;
+  const char* labels[MAX_TABS];
+  for (int i = 0; i < count; i++) labels[i] = tabLabel(i);
+  buildTabBand(screen, mappedInput, labels, count, activeTab(), ringPos() == 0, ACTION_TAB);
+}
+
+void buildTabBand(UiAppHost::UiScreen& screen, const MappedInputManager& input, const char* const* labels,
+                  const int count, const int active, const bool focused, const fui::ActionId action) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  // Tabs. The selected pill dims to a dither when the selection is down in
+  // the list (the legacy focused/unfocused tab distinction).
+  constexpr int MAX_TABS = 8;
+  const int tabs = count < MAX_TABS ? count : MAX_TABS;
+  fui::TabItem items[MAX_TABS];
+  for (int i = 0; i < tabs; i++) {
+    items[i].label = labels[i];
+    items[i].value = static_cast<int16_t>(i);
+    items[i].selected = active == i;
   }
   fui::TabBarProps tabProps;
-  tabProps.tabs = tabs;
-  tabProps.count = static_cast<uint16_t>(count);
-  tabProps.action = ACTION_TAB;
+  tabProps.tabs = items;
+  tabProps.count = static_cast<uint16_t>(tabs);
+  tabProps.action = action;
   tabProps.inputMask = fui::InputTouch;
   // Pill shape and label size are theme-driven. Lyra uses equal-width slots
   // with small labels so wide text (e.g. "Controls") still fits at large UI scales.
@@ -133,7 +142,7 @@ void UiTabListActivity::buildTabBar(UiScreen& screen) {
   // (slot minus a 4px frame, 8px clearance above the divider) with
   // body-size labels; zero horizontal contentInset disables the tabBar's
   // label-width shrink.
-  const bool tabsFocused = ringPos() == 0;
+  const bool tabsFocused = focused;
   if (metrics.tabPillFullSlot) {
     tabProps.text = screen.theme().bodyText;
     tabProps.tabInset = fui::Insets{4, 4, 7, 4};
@@ -149,7 +158,7 @@ void UiTabListActivity::buildTabBar(UiScreen& screen) {
   }
   const int16_t tabLineHeight = screen.target().lineHeight(tabProps.text.font);
   const int16_t preferredTabHeight =
-      mappedInput.hasTouch() ? TOUCH_TAB_BAR_HEIGHT : static_cast<int16_t>(metrics.tabBarHeight);
+      input.hasTouch() ? TOUCH_TAB_BAR_HEIGHT : static_cast<int16_t>(metrics.tabBarHeight);
   const int16_t tabBand = preferredTabHeight > tabLineHeight + 10 ? preferredTabHeight : tabLineHeight + 10;
   // Legacy Lyra two-state treatment: with the selection on the tab band, the
   // band fills gray and the active tab is a solid pill; with the selection

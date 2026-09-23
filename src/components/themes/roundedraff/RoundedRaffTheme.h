@@ -80,7 +80,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .textFieldLineEndOffset = -1,
                                  .controlRadius = 18,
                                  .sheetRadius = 18,
-                                 .capsuleRadius = 255};
+                                 .capsuleRadius = 255,
+                                 .coverCardFill = true};
 }
 
 class RoundedRaffTheme : public BaseTheme {
