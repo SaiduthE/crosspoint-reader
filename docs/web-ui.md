@@ -162,7 +162,9 @@ Dark mode: tokens only; no component overrides.
 6. **Budget**: the four pages together stay under the size they are today
    (FilesPage 231 KB raw is dominated by its script; do not grow it). Vanilla
    JS, no frameworks, no external fonts or CDNs — the captive portal has no
-   internet.
+   internet. One deliberate exception: Convert serves pdf.js from flash
+   (`pdf.min.js` 89 KB + `pdf.worker.min.js` 290 KB gzipped), fetched only when
+   a PDF is added — there is no CDN to fall back on.
 7. **Verify in a browser** before finishing: `python -m http.server 8000` from
    `src/network/html/` serves `/css/app.css` and `/js/app.js` at the right
    paths; open `http://localhost:8000/<Page>.html` at 360, 768 and 1280 px
@@ -192,6 +194,19 @@ Dark mode: tokens only; no component overrides.
   number input, `string` a text/password input. Wi-Fi networks and OPDS servers
   are two more sections in the same nav. The save button becomes the `.savebar`
   ("3 changes" left, "Save changes" right), shown only when something changed.
+- **Convert** (`ConvertPage.html` + `js/bindery-core.js`, `js/bindery-app.js`):
+  manga, comics and books made ready on the phone. Two modes (`.btn-group`):
+  *Manga and comics* takes CBZ/ZIP, PDF, image EPUBs and loose pictures and
+  writes XTCH (default), XTC, fixed-layout EPUB or CBZ at the reader's size;
+  *Books* turns TXT/Markdown/HTML into a reflowable EPUB with detected
+  chapters and a made cover, and tidies EPUB pictures (shrink, grey,
+  baseline — progressive JPEGs decode at 1/8 on the reader). "Send to
+  reader" streams XTC pages over the Files page's WebSocket upload as they
+  are drawn (header and page table first: every page is the same size), so
+  memory on the phone stays flat; "Save to this phone" keeps them instead.
+  The same file builds a standalone single-page copy
+  (`scripts/bindery/build_standalone.py`, `data-bindery-host="standalone"`,
+  no shell). Tests and the mock reader live in `scripts/bindery/`.
 - **Fonts** (`FontsPage.html`): installed fonts as a `.list` (name, sizes,
   Delete as `.btn-danger.btn-sm`); upload as a `.card` with a `.field` file
   input and the progress bar as `.progress`. Empty state: "No fonts on the card

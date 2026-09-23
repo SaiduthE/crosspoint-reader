@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Convert – e-Minimal</title>
+    <link rel="stylesheet" href="/css/app.css" />
+    <script src="/js/app.js" defer></script>
+    <script src="/js/bindery-core.js" defer></script>
+    <script src="/js/bindery-app.js" defer></script>
+    <style>
+      /* Convert page. Built to docs/web-ui.md; everything here is scoped. The
+         same markup runs outside the reader as a single file
+         (scripts/bindery/build_standalone.py), where data-bindery-host is
+         "standalone" and there is no shell. */
+      body[data-page="convert"] [hidden] { display: none !important; }
+      body[data-page="convert"] [data-host="standalone"] { display: none; }
+      body[data-page="convert"][data-bindery-host="standalone"] [data-host="device"] { display: none; }
+      body[data-page="convert"][data-bindery-host="standalone"] [data-host="standalone"] { display: block; }
+      body[data-page="convert"] .standalone-head { margin: 8px 0 20px; }
+      body[data-page="convert"] .standalone-head h1 { margin-bottom: 6px; }
+      body[data-page="convert"] .lede { color: var(--ink-2); max-width: 64ch; margin: 0 0 16px; }
+      body[data-page="convert"] .mode { display: flex; margin: 0 0 16px; }
+      body[data-page="convert"] .mode .btn { flex: 1 1 0; }
+      body[data-page="convert"] .dropzone { margin-bottom: 12px; }
+      body[data-page="convert"] .dropzone strong { display: block; color: var(--ink); margin-bottom: 4px; font-weight: 600; }
+      body[data-page="convert"] .file-row .row-main { min-width: 0; overflow-wrap: anywhere; }
+      body[data-page="convert"] .file-row .row-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+      body[data-page="convert"] .file-row.is-error .row-meta { color: var(--danger); }
+
+      body[data-page="convert"] .preview-stage { display: flex; gap: 8px; justify-content: center; align-items: flex-start; padding: 12px; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; overflow: auto; min-height: 180px; }
+      body[data-page="convert"] .preview-stage canvas { display: block; width: auto; max-width: 100%; max-height: 62vh; height: auto; background: #fff; border: 1px solid var(--rule); image-rendering: auto; }
+      body[data-page="convert"] .preview-stage.split canvas { max-width: calc(50% - 4px); }
+      body[data-page="convert"] .preview-stage.actual { justify-content: flex-start; max-height: 70vh; }
+      body[data-page="convert"] .preview-stage.actual canvas { max-width: none; max-height: none; image-rendering: pixelated; }
+      body[data-page="convert"] .preview-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+      body[data-page="convert"] .preview-nav .count { flex: 1 1 auto; text-align: center; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: .875rem; }
+      body[data-page="convert"] .preview-info { margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+
+      body[data-page="convert"] .grid-2 { display: grid; grid-template-columns: 1fr; gap: 0 16px; }
+      @media (min-width: 600px) { body[data-page="convert"] .grid-2 { grid-template-columns: 1fr 1fr; } }
+      body[data-page="convert"] .range-row { display: flex; align-items: center; gap: 12px; }
+      body[data-page="convert"] .range-row input[type="range"] { flex: 1 1 auto; height: 32px; padding: 0; border: 0; background: transparent; accent-color: var(--ink); }
+      body[data-page="convert"] .range-row output { width: 4ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+      body[data-page="convert"] .switches .row { gap: 12px; }
+      body[data-page="convert"] details.more { margin-top: 4px; }
+      body[data-page="convert"] details.more > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--ink-2); }
+
+      body[data-page="convert"] .chapters { max-height: 280px; overflow: auto; }
+      body[data-page="convert"] .chapters .row-meta { font-variant-numeric: tabular-nums; }
+      body[data-page="convert"] .cover-wrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+      body[data-page="convert"] .cover-wrap canvas { width: 132px; height: auto; border: 1px solid var(--rule); background: #fff; flex: 0 0 auto; }
+      body[data-page="convert"] .cover-wrap .chapters-box { flex: 1 1 240px; min-width: 0; }
+
+      body[data-page="convert"] .run .progress { margin: 12px 0 8px; }
+      body[data-page="convert"] .results .row-main { min-width: 0; overflow-wrap: anywhere; }
+      body[data-page="convert"] .estimate { font-variant-numeric: tabular-nums; }
+    </style>
+  </head>
+  <body data-page="convert" data-title="Convert" data-bindery-host="device">
+    <main>
+      <div class="standalone-head" data-host="standalone">
+        <h1>e-Minimal Convert</h1>
+        <p class="lede">Turn manga, comics and books into files an e-ink reader opens fast. Everything happens in this browser; nothing is uploaded anywhere.</p>
+      </div>
+      <p class="lede" data-host="device">Turn manga, comics and books into files this reader opens fast. The work happens on your phone and the finished pages go straight onto the card.</p>
+
+      <div class="mode btn-group" role="group" aria-label="What are you converting?">
+        <button type="button" class="btn" id="modeManga" aria-pressed="true">Manga and comics</button>
+        <button type="button" class="btn" id="modeBooks" aria-pressed="false">Books</button>
+      </div>
+
+      <!-- Files -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Files</h2>
+          <button type="button" class="btn btn-sm btn-ghost" id="clearFiles" hidden>Remove all</button>
+        </div>
+        <label class="dropzone" id="dropzone" for="fileInput">
+          <strong id="dropTitle">Choose files or drop them here</strong>
+          <span id="dropHint">CBZ, ZIP, PDF, EPUB or pictures (JPG, PNG, WebP)</span>
+          <input type="file" id="fileInput" class="visually-hidden" multiple />
+        </label>
+        <div class="list" id="fileList"></div>
+        <p class="empty" id="filesEmpty">Nothing added yet. Pick a volume to see how its pages will look.</p>
+      </section>
+
+      <!-- Preview: manga -->
+      <section class="card" id="mangaPreviewCard" hidden>
+        <div class="card-head">
+          <h2>Preview</h2>
+          <label class="check small"><span>Original</span><span class="toggle"><input type="checkbox" id="showOriginal" /><span></span></span></label>
+        </div>
+        <div class="preview-stage" id="previewStage" title="Tap to see actual pixels"></div>
+        <div class="preview-nav">
+          <button type="button" class="btn btn-sm" id="prevPage" aria-label="Previous page">Previous</button>
+          <span class="count" id="pageCount">Page 1 of 1</span>
+          <button type="button" class="btn btn-sm" id="nextPage" aria-label="Next page">Next</button>
+        </div>
+        <p class="preview-info small muted" id="previewInfo" role="status" aria-live="polite"></p>
+      </section>
+
+      <!-- Preview: books -->
+      <section class="card" id="bookPreviewCard" hidden>
+        <h2>Preview</h2>
+        <div class="cover-wrap">
+          <canvas id="coverCanvas" width="468" height="624" aria-label="Cover"></canvas>
+          <div class="chapters-box">
+            <p class="small muted" id="bookSummary"></p>
+            <div class="list chapters" id="chapterList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings: manga -->
+      <section class="card" id="mangaSettings">
+        <h2>Settings</h2>
+        <div class="grid-2">
+          <div class="field">
+            <label for="device">Reader</label>
+            <select id="device">
+              <option value="eminimal">e-Minimal 7.8″ — 1404 × 1872</option>
+              <option value="x4">Xteink X4 — 480 × 800</option>
+              <option value="custom">Another size…</option>
+            </select>
+            <div class="field-row" id="customSize" hidden style="margin-top:8px">
+              <input type="number" id="customW" min="200" max="4000" value="1404" aria-label="Width in pixels" />
+              <span class="muted">×</span>
+              <input type="number" id="customH" min="200" max="4000" value="1872" aria-label="Height in pixels" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="format">File type</label>
+            <select id="format">
+              <option value="xtch">XTCH — best for e-Minimal (4 greys)</option>
+              <option value="xtc">XTC — black and white, smaller files</option>
+              <option value="epub">EPUB — for other e-readers (slow on e-Minimal)</option>
+              <option value="cbz">CBZ — unsupported on e-Minimal (comic apps)</option>
+            </select>
+            <p class="field-hint" id="formatHint"></p>
+          </div>
+          <div class="field">
+            <label for="direction">Reading direction</label>
+            <select id="direction">
+              <option value="rtl">Right to left (manga)</option>
+              <option value="ltr">Left to right (comics)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="spread">Double-page spreads</label>
+            <select id="spread">
+              <option value="split">Split into two pages</option>
+              <option value="rotate">Turn sideways</option>
+              <option value="keep">Keep as one small page</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="list switches">
+          <div class="row"><span class="row-main">Trim white margins<span class="row-meta">Uses more of the screen</span></span><label class="toggle" aria-label="Trim white margins"><input type="checkbox" id="trim" checked /><span></span></label></div>
+          <div class="row"><span class="row-main">Fill the screen<span class="row-meta">Crops the edges instead of leaving bars</span></span><label class="toggle" aria-label="Fill the screen"><input type="checkbox" id="fill" /><span></span></label></div>
+          <div class="row" id="joinRow" hidden><span class="row-main">Join into one book<span class="row-meta">Each file becomes a chapter</span></span><label class="toggle" aria-label="Join into one book"><input type="checkbox" id="join" /><span></span></label></div>
+        </div>
+
+        <details class="more">
+          <summary>Tone and dithering</summary>
+          <div class="list switches">
+            <div class="row"><span class="row-main">Auto contrast<span class="row-meta">Stretches faded scans to full black and white</span></span><label class="toggle" aria-label="Auto contrast"><input type="checkbox" id="autoLevels" checked /><span></span></label></div>
+          </div>
+          <div class="grid-2" style="margin-top:12px">
+            <div class="field">
+              <label for="contrast">Contrast</label>
+              <div class="range-row"><input type="range" id="contrast" min="-40" max="40" step="1" value="0" /><output id="contrastOut" for="contrast">0</output></div>
+            </div>
+            <div class="field">
+              <label for="gamma">Midtones</label>
+              <div class="range-row"><input type="range" id="gamma" min="50" max="200" step="5" value="100" aria-describedby="gammaHint" /><output id="gammaOut" for="gamma">1.00</output></div>
+              <p class="field-hint" id="gammaHint">Lower is darker. E-ink greys look lighter than a phone’s.</p>
+            </div>
+            <div class="field">
+              <label for="dither">Dithering</label>
+              <select id="dither">
+                <option value="floyd">Smooth (Floyd–Steinberg)</option>
+                <option value="atkinson">Crisp line art (Atkinson)</option>
+                <option value="ordered">Even pattern (ordered)</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <div class="grid-2" id="metaFields" style="margin-top:12px">
+          <div class="field"><label for="title">Title</label><input id="title" type="text" autocomplete="off" /></div>
+          <div class="field"><label for="author">Author</label><input id="author" type="text" autocomplete="off" /></div>
+        </div>
+      </section>
+
+      <!-- Settings: books -->
+      <section class="card" id="bookSettings" hidden>
+        <h2>Settings</h2>
+        <div class="grid-2">
+          <div class="field"><label for="bTitle">Title</label><input id="bTitle" type="text" autocomplete="off" /></div>
+          <div class="field"><label for="bAuthor">Author</label><input id="bAuthor" type="text" autocomplete="off" /></div>
+          <div class="field">
+            <label for="chapters">Chapters</label>
+            <select id="chapters">
+              <option value="auto">Find chapter headings</option>
+              <option value="h1">Markdown: split at # headings</option>
+              <option value="h2">Markdown: split at # and ## headings</option>
+              <option value="none">One long chapter</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="lang">Language</label>
+            <select id="lang">
+              <option value="en">English</option><option value="ja">Japanese</option><option value="zh">Chinese</option>
+              <option value="ko">Korean</option><option value="fr">French</option><option value="de">German</option>
+              <option value="es">Spanish</option><option value="it">Italian</option><option value="pt">Portuguese</option>
+              <option value="nl">Dutch</option><option value="ru">Russian</option><option value="hi">Hindi</option>
+              <option value="te">Telugu</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="coverMode">Cover</label>
+            <select id="coverMode">
+              <option value="make">Make one from the title</option>
+              <option value="image">Use a picture…</option>
+              <option value="none">No cover</option>
+            </select>
+            <input type="file" id="coverFile" accept="image/*" hidden style="margin-top:8px" />
+          </div>
+          <div class="field">
+            <label for="bDevice">Reader</label>
+            <select id="bDevice">
+              <option value="eminimal">e-Minimal 7.8″ — 1404 × 1872</option>
+              <option value="x4">Xteink X4 — 480 × 800</option>
+            </select>
+            <p class="field-hint">Sets the cover size and how far pictures in an EPUB are shrunk.</p>
+          </div>
+        </div>
+        <div class="list switches">
+          <div class="row"><span class="row-main">Remove the Project Gutenberg licence<span class="row-meta">The header and footer around the book text</span></span><label class="toggle" aria-label="Remove the Project Gutenberg licence"><input type="checkbox" id="gutenberg" checked /><span></span></label></div>
+          <div class="row"><span class="row-main">Shrink and grey pictures in EPUBs<span class="row-meta">Big or progressive JPEGs open slowly and blurry on the reader</span></span><label class="toggle" aria-label="Shrink and grey pictures in EPUBs"><input type="checkbox" id="shrink" checked /><span></span></label></div>
+        </div>
+      </section>
+
+      <!-- Run -->
+      <section class="card run">
+        <h2>Convert</h2>
+        <div class="field" data-host="device">
+          <label for="folder">Folder on the card</label>
+          <input id="folder" type="text" value="/Manga" autocomplete="off" spellcheck="false" />
+          <p class="field-hint">Created if it is not there. Books show up under this folder on the reader.</p>
+        </div>
+        <p class="small muted estimate" id="estimate"></p>
+        <div class="toolbar">
+          <button type="button" class="btn btn-primary" id="sendBtn" data-host="device" disabled>Send to reader</button>
+          <button type="button" class="btn" id="saveBtn" disabled>Save to this device</button>
+          <button type="button" class="btn btn-ghost" id="cancelBtn" hidden>Cancel</button>
+        </div>
+        <div id="runProgress" hidden>
+          <div class="progress" aria-hidden="true"><span id="runBar"></span></div>
+          <p class="small muted" id="runStatus" role="status" aria-live="polite"></p>
+        </div>
+        <div class="list results" id="results"></div>
+      </section>
+
+      <p class="foot" data-host="standalone">e-Minimal · open source · PDF support by pdf.js (Apache 2.0)</p>
+    </main>
+  </body>
+</html>
