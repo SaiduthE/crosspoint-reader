@@ -39,9 +39,9 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .scrollBarWidth = 4,
                                  .scrollBarRightOffset = 5,
                                  .homeTopPadding = 55,
-                                 // Smaller cover tile so the home menu sits higher (fits 5 items without overlap).
-                                 .homeCoverHeight = 300,
-                                 .homeCoverTileHeight = 350,
+                                 // Same cover height as Lyra, so both themes share thumb_226.bmp.
+                                 .homeCoverHeight = 226,
+                                 .homeCoverTileHeight = 250,
                                  .homeRecentBooksCount = 1,
                                  .homeContinueReadingInMenu = true,
                                  .homeMenuTopOffset = 20,
@@ -85,8 +85,6 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
 
 class RoundedRaffTheme : public BaseTheme {
  public:
-  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
-                  const char* subtitle = nullptr) const override;
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                            int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                            std::function<bool()> storeCoverBuffer) const override;
@@ -98,5 +96,4 @@ class RoundedRaffTheme : public BaseTheme {
                      int contentStartX = 0, int contentWidth = 0) const override;
   void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                        const char* btn4) const override;
-  bool homeMenuShowsContinueReading() const { return true; }
 };
