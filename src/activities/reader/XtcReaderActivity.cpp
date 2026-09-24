@@ -50,26 +50,44 @@ static_assert(kXthGray4.v[0x08] == 0xFF5F, "XTH value 1 must be dark grey (0x5)"
 static_assert(kXthGray4.v[0x80] == 0xFFAF, "XTH value 2 must be light grey (0xA)");
 static_assert(kXthGray4.v[0x88] == 0xFF0F, "XTH value 3 must be black");
 static_assert(kXthGray4.v[0x00] == 0xFFFF, "XTH value 0 must be white");
-}  // namespace
 
-uint8_t* XtcReaderActivity::ensureGray4Frame(const size_t bytes) {
-  if (gray4Frame && gray4FrameSize == bytes) return gray4Frame.get();
-  gray4Frame.reset();
-  gray4FrameSize = 0;
-  gray4Frame = HalMemory::allocatePsram(bytes);
-  if (!gray4Frame) {
-    LOG_ERR("XTR", "No PSRAM for the 4bpp frame (%lu bytes); using the plane path", static_cast<unsigned long>(bytes));
-    return nullptr;
+// A panel-sized XTH page expanded one physical row at a time into the rows
+// GfxRenderer::displayGray4Rows() sends. Plane byte i is frame-buffer byte i
+// (8 physical pixels, MSB first), so row y is plane bytes y * rowBytes ..
+// + rowBytes - 1 and each byte's 8 pixels are 4bpp bytes 4i..4i+3 of `dst`
+// (left pixel in the high nibble). The same pass leaves the B/W base in the
+// frame buffer -- what the plane path leaves there for whatever draws over the
+// page next -- and weighs the ink for the dark-page test. Runs on the reader's
+// task, a row at a time, while the rows before it are on the wire: no
+// blocking, no allocation.
+struct XthGray4Rows {
+  const uint8_t* plane1;
+  const uint8_t* plane2;
+  uint8_t* fb;
+  size_t rowBytes;
+  uint64_t ink;  // black 3, dark 2, light 1 a pixel, summed over the page
+};
+
+void fillXthGray4Row(void* ctx, const uint16_t row, uint8_t* dst) {
+  auto& rows = *static_cast<XthGray4Rows*>(ctx);
+  const size_t start = static_cast<size_t>(row) * rows.rowBytes;
+  const uint8_t* const p1 = rows.plane1 + start;
+  const uint8_t* const p2 = rows.plane2 + start;
+  uint8_t* const fb = rows.fb + start;
+  // The driver's send rows are word-aligned DMA buffers; one store a plane byte.
+  uint32_t* const out = reinterpret_cast<uint32_t*>(dst);
+  uint32_t ink = 0;  // at most 8 * 3 a byte, so a row's sum fits easily
+  for (size_t i = 0, n = rows.rowBytes; i < n; i++) {
+    const uint8_t a = p1[i], b = p2[i];
+    fb[i] = static_cast<uint8_t>(~(a | b));
+    // black 3, dark 2, light 1 == popcount(a) + 2 * popcount(b)
+    ink += __builtin_popcount(a) + 2 * __builtin_popcount(b);
+    out[i] = static_cast<uint32_t>(kXthGray4.v[(a & 0xF0) | (b >> 4)]) |
+             (static_cast<uint32_t>(kXthGray4.v[((a & 0x0F) << 4) | (b & 0x0F)]) << 16);
   }
-  gray4FrameSize = bytes;
-  return gray4Frame.get();
+  rows.ink += ink;
 }
-
-void XtcReaderActivity::onExit() {
-  ReaderActivity::onExit();
-  gray4Frame.reset();
-  gray4FrameSize = 0;
-}
+}  // namespace
 
 bool XtcReaderActivity::loadBook() {
   auto loadedXtc = makeUniqueNoThrow<Xtc>(bookPath, "/.crosspoint");
@@ -321,33 +339,21 @@ void XtcReaderActivity::renderPage() {
       }
     };
 
-    // 16-level panels (IT8951): expand the page straight into one 4bpp frame
-    // and send it as the page's single grey refresh, instead of staging the
-    // base, copying the LSB/MSB planes and having the driver fold all three
-    // back into 4bpp. Plane byte i is frame-buffer byte i (8 physical pixels,
-    // MSB first), so its 8 pixels are 4bpp bytes 4i..4i+3 (row stride
-    // widthBytes * 4, left pixel in the high nibble). The same pass leaves
-    // the B/W base in the frame buffer -- what the plane path leaves there for
-    // whatever draws over the page next -- and weighs the ink for the dark test.
-    uint8_t* const fb4 = direct && renderer.supportsGray4() && planeSize == renderer.getBufferSize()
-                             ? ensureGray4Frame(planeSize * 4)
-                             : nullptr;
-    if (fb4) {
-      uint32_t* out = reinterpret_cast<uint32_t*>(fb4);
-      uint64_t ink = 0;
-      for (size_t i = 0; i < planeSize; i++) {
-        const uint8_t a = plane1[i], b = plane2[i];
-        fb[i] = static_cast<uint8_t>(~(a | b));
-        // black 3, dark 2, light 1 == popcount(a) + 2 * popcount(b)
-        ink += __builtin_popcount(a) + 2 * __builtin_popcount(b);
-        out[i] = static_cast<uint32_t>(kXthGray4.v[(a & 0xF0) | (b >> 4)]) |
-                 (static_cast<uint32_t>(kXthGray4.v[((a & 0x0F) << 4) | (b & 0x0F)]) << 16);
-      }
-      prevPageDark = ink > static_cast<uint64_t>(planeSize) * 8 * 3 * DARK_PAGE_PERCENT / 100;
-      const unsigned long tBuilt = millis();
-
+    // 16-level panels (IT8951): expand the page straight into the driver's
+    // send rows (fillXthGray4Row, above) as the page's single grey refresh,
+    // instead of staging the base, copying the LSB/MSB planes and having the
+    // driver fold all three back into 4bpp. No 4bpp frame is built first: a
+    // 1.3 MB PSRAM write the driver then read back row by row (~215 ms a
+    // page); now most of the expansion overlaps the wire time. The size check
+    // keeps the row fill's frame-buffer writes and plane reads in step with
+    // the rows the driver asks for.
+    if (direct && renderer.supportsGray4() && planeSize == renderer.getBufferSize()) {
+      XthGray4Rows rows{plane1, plane2, fb, renderer.getDisplayWidthBytes(), 0};
       // HALF, as the staged base asked of displayGrayBuffer(): GC16 every page.
-      if (renderer.displayGray4Buffer(fb4, HalDisplay::HALF_REFRESH)) {
+      // The planes are only read until this returns; pageBuffer is freed after.
+      if (renderer.displayGray4Rows(fillXthGray4Row, &rows, HalDisplay::HALF_REFRESH)) {
+        // Only the next page's cleanup reads this, so it can wait for the sum.
+        prevPageDark = rows.ink > static_cast<uint64_t>(planeSize) * 8 * 3 * DARK_PAGE_PERCENT / 100;
         pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
         if (repeat) renderer.repeatLastRefresh();
         const unsigned long tGray = millis();
@@ -358,15 +364,15 @@ void XtcReaderActivity::renderPage() {
 
         free(pageBuffer);
 
-        LOG_INF("XTR", "Page %lu/%lu (2-bit, gray4%s%s): load %lu ms, build %lu, gray4 %lu, cleanup %lu",
-                currentPage + 1, xtc->getPageCount(),
+        LOG_INF("XTR", "Page %lu/%lu (2-bit, gray4%s%s): load %lu ms, gray4 %lu, cleanup %lu", currentPage + 1,
+                xtc->getPageCount(),
                 flashed  ? ", white flash first"
                 : repeat ? ", repeated"
                          : "",
-                prevPageDark ? ", dark" : "", t0 - tLoad, tBuilt - t0, tGray - tBuilt, millis() - tGray);
+                prevPageDark ? ", dark" : "", t0 - tLoad, tGray - t0, millis() - tGray);
         return;
       }
-      LOG_ERR("XTR", "displayGray4Buffer refused the frame; using the plane path");
+      LOG_ERR("XTR", "displayGray4Rows refused the page; using the plane path");
     }
 
     fillPass(Pass::Base);
