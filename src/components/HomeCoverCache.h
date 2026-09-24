@@ -13,7 +13,11 @@ class GfxRenderer;
 // Screen-lifetime thumbnail decoding and PSRAM region snapshots.
 class HomeCoverCache {
  public:
+#if FREEINK_DEVICE_EMINIMAL
+  static constexpr size_t MAX_COVERS = 9;  // e-Minimal home: current + 4x2 grid
+#else
   static constexpr size_t MAX_COVERS = 7;
+#endif
   explicit HomeCoverCache(GfxRenderer& renderer) : renderer(renderer) {}
   void begin();
   void prepare();

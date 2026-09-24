@@ -137,7 +137,6 @@ void scaleMetrics(ThemeMetrics& m, const float s) {
   sc(m.homeCoverHeight);
   sc(m.homeCoverTileHeight);
   sc(m.homeMenuTopOffset);
-  sc(m.coverGridTabBarHeight);
   sc(m.buttonHintsHeight);
   sc(m.sideButtonHintsWidth);
   sc(m.progressBarHeight);

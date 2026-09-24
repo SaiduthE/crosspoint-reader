@@ -28,6 +28,11 @@
 namespace fui = freeink::ui;
 
 namespace {
+// Space under the readout/help line: the hint strip when there is one, else a
+// margin so the text does not sit on the glass edge (e-Minimal draws no hints).
+int bottomReserve(const ThemeMetrics& metrics) {
+  return metrics.buttonHintsHeight > 0 ? metrics.buttonHintsHeight : metrics.verticalSpacing;
+}
 constexpr int SIDE_PADDING = 12;
 constexpr unsigned long LONG_PRESS_MS = 1000;
 
@@ -937,7 +942,7 @@ void LibraryListActivity::buildScreen(UiScreen& screen) {
   const int16_t readoutReserved = static_cast<int16_t>(renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing);
   buildHeader(screen);
   screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
-                                                static_cast<int16_t>(metrics.buttonHintsHeight + readoutReserved), 0});
+                                                static_cast<int16_t>(bottomReserve(metrics) + readoutReserved), 0});
 
   if (!degraded) buildTabBar(screen);
   if (bookRowCount() == 0) {
@@ -969,7 +974,7 @@ void LibraryListActivity::drawPositionReadout() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getTextWidth(SMALL_FONT_ID, buf);
   const int x = renderer.getScreenWidth() - width - SIDE_PADDING;
-  const int y = renderer.getScreenHeight() - metrics.buttonHintsHeight - renderer.getLineHeight(SMALL_FONT_ID);
+  const int y = renderer.getScreenHeight() - bottomReserve(metrics) - renderer.getLineHeight(SMALL_FONT_ID);
   renderer.drawText(SMALL_FONT_ID, x, y, buf, true);
 }
 
@@ -993,7 +998,7 @@ void LibraryListActivity::drawHoldHelp() const {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int y = renderer.getScreenHeight() - metrics.buttonHintsHeight - lineHeight;
+  const int y = renderer.getScreenHeight() - bottomReserve(metrics) - lineHeight;
   GUI.drawHelpText(renderer, Rect{SIDE_PADDING, y, renderer.getScreenWidth() / 2 - SIDE_PADDING, lineHeight}, help);
 }
 

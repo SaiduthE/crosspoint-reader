@@ -6,12 +6,29 @@
 #include "RecentBooksStore.h"
 #include "activities/Activity.h"
 #include "components/CoverGridHomeUi.h"
+#include "components/EMinimalHomeUi.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
 
 class HomeActivity final : public Activity {
   std::unique_ptr<CoverGridHomeUi> coverGridUi;
+  // The e-Minimal theme's own grid home; upstream's CoverGridHomeUi serves the
+  // Cover Grid theme unchanged. At most one of the two is live.
+  std::unique_ptr<EMinimalHomeUi> eminimalUi;
+  static_assert(EMinimalHomeUi::THUMB_HEIGHT == CoverGridHomeUi::THUMB_HEIGHT);
+  bool hasGridHome() const { return coverGridUi || eminimalUi; }
+  // Books the live grid home shows (current + grid).
+  int gridMaxBooks() const { return eminimalUi ? EMinimalHomeUi::MAX_BOOKS : CoverGridHomeUi::MAX_BOOKS; }
+  // Runs f on whichever grid home is live (same member names on both).
+  template <typename F>
+  void onGridHome(F&& f) {
+    if (eminimalUi) {
+      f(*eminimalUi);
+    } else if (coverGridUi) {
+      f(*coverGridUi);
+    }
+  }
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
   bool recentsLoading = false;

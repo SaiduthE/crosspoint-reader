@@ -34,6 +34,9 @@
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
+#if FREEINK_DEVICE_EMINIMAL
+#include "components/themes/eminimal/EMinimalTheme.h"  // HINT_FONT_ID
+#endif
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "platform/UsbSerialJtagHandoff.h"
@@ -164,6 +167,9 @@ EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, 
 // them. The three families are only compiled in for this device (all.h).
 EpdFont smallFont(&notosans_16_small);
 EpdFontFamily smallFontFamily(&smallFont);
+// Button legends stay at the 1.5x tier's 12 px while the rest of the UI grew.
+EpdFont hintFont(&notosans_12_small);
+EpdFontFamily hintFontFamily(&hintFont);
 
 EpdFont ui10RegularFont(&ubuntu_20_regular);
 EpdFont ui10BoldFont(&ubuntu_20_bold);
@@ -398,6 +404,9 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+#if FREEINK_DEVICE_EMINIMAL
+  renderer.insertFont(HINT_FONT_ID, hintFontFamily);
+#endif
 
   // Discover and load SD card fonts
   sdFontSystem.begin(renderer);

@@ -26,17 +26,10 @@
 #include "fontIds.h"
 
 namespace {
-// e-Minimal has no front Left/Right (Up/Down/Select/Back only), so the cover
-// grid's split navigation -- side buttons for covers, front Left/Right for the
-// tabs -- would leave the tab row, Settings included, out of reach. There the
-// cover grid home takes the flat Up/Down walk the list home uses: current
-// book, grid row by row, then the tabs, wrapping at both ends. Holding Down
-// jumps to the tabs and holding Up back to the current book.
-#if FREEINK_DEVICE_EMINIMAL
-constexpr bool kCoverGridFlatNav = true;
-#else
-constexpr bool kCoverGridFlatNav = false;
-#endif
+// The e-Minimal home (four buttons, no front Left/Right) walks flat: Up/Down
+// go current book -> grid row by row -> tabs, wrapping at both ends; holding
+// Down jumps to the tabs and holding Up back to the current book. Upstream's
+// Cover Grid keeps its split navigation.
 constexpr unsigned long COVER_GRID_JUMP_MS = 700;
 }  // namespace
 
@@ -54,7 +47,7 @@ int HomeActivity::getMenuItemCount() const {
 void HomeActivity::loadRecentBooks(int maxBooks) {
   recentBooks.clear();
   const auto& books = RECENT_BOOKS.getBooks();
-  recentBooks.reserve(coverGridUi ? maxBooks : std::min(static_cast<int>(books.size()), maxBooks));
+  recentBooks.reserve(hasGridHome() ? maxBooks : std::min(static_cast<int>(books.size()), maxBooks));
 
   for (const RecentBook& book : books) {
     // Limit to maximum number of recent books
@@ -72,7 +65,7 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
 }
 
 void HomeActivity::fillCoverGridFromLibrary() {
-  if (recentBooks.size() >= CoverGridHomeUi::MAX_BOOKS) return;
+  if (recentBooks.size() >= static_cast<size_t>(gridMaxBooks())) return;
   // Keep the index and record together off the task stack; reuse for every row.
   struct LibraryReader {
     library::LibraryIndexFile index;
@@ -95,7 +88,7 @@ void HomeActivity::fillCoverGridFromLibrary() {
       return;
     }
   }
-  for (uint16_t row = 0; row < index.bookCount() && recentBooks.size() < CoverGridHomeUi::MAX_BOOKS; ++row) {
+  for (uint16_t row = 0; row < index.bookCount() && recentBooks.size() < static_cast<size_t>(gridMaxBooks()); ++row) {
     RecentBook book;
     if (!index.readRecord(index.ordinalForRow(library::SortOrder::RecentDesc, row), record) ||
         !index.readPath(record, book.path))
@@ -183,8 +176,9 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   for (RecentBook& book : recentBooks) {
     // The cover grid draws each slot at its own size; generating at any other
     // height would rescale the dithered thumb at draw time and alias badly.
-    const int thumbHeight = coverGridUi ? coverGridUi->thumbHeightFor(progress) : coverHeight;
-    if (coverGridUi) {
+    int thumbHeight = coverHeight;
+    onGridHome([&](auto& home) { thumbHeight = home.thumbHeightFor(progress); });
+    if (hasGridHome()) {
       loadGridCover(book, thumbHeight, showingLoading, popupRect);
       ++progress;
       if (showingLoading) GUI.fillPopupProgress(renderer, popupRect, progress * 100 / recentBooks.size());
@@ -248,15 +242,22 @@ void HomeActivity::onEnter() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   if (UITheme::getInstance().hasCoverGridHome()) {
     // Screen-lifetime interaction tables and component properties exceed the stack budget.
-    coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
-    if (!coverGridUi) LOG_ERR("HOME", "OOM: cover grid UI; using standard home");
+#if FREEINK_DEVICE_EMINIMAL
+    if (SETTINGS.uiTheme == CrossPointSettings::EMINIMAL) {
+      eminimalUi = makeUniqueNoThrow<EMinimalHomeUi>(renderer);
+    } else
+#endif
+    {
+      coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
+    }
+    if (!hasGridHome()) LOG_ERR("HOME", "OOM: cover grid UI; using standard home");
   }
-  loadRecentBooks(coverGridUi ? CoverGridHomeUi::MAX_BOOKS : metrics.homeRecentBooksCount);
+  loadRecentBooks(hasGridHome() ? gridMaxBooks() : metrics.homeRecentBooksCount);
   hasContinueReading = !recentBooks.empty();
-  if (coverGridUi) {
+  if (hasGridHome()) {
     fillCoverGridFromLibrary();
     resolveGridCoverPaths();
-    coverGridUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
+    onGridHome([&](auto& home) { home.begin(recentBooks, hasOpdsServers, hasContinueReading); });
   }
 
   const auto base = static_cast<int>(recentBooks.size());
@@ -270,6 +271,7 @@ void HomeActivity::onExit() {
   Activity::onExit();
 
   coverGridUi.reset();
+  eminimalUi.reset();
 
   // Free the stored cover buffer if any
   freeCoverBuffer();
@@ -344,8 +346,8 @@ void HomeActivity::loop() {
 
   // Cover grid home splits navigation by button group (see below); the flat
   // next/previous cycle is for the classic list home, and for the cover grid
-  // on boards without front Left/Right (kCoverGridFlatNav).
-  if (coverGridUi && kCoverGridFlatNav) {
+  // on the e-Minimal home (four buttons, no front Left/Right).
+  if (eminimalUi) {
     // Steps land on release, so a hold jumps between the bands without a step
     // first; wasLongPressed() swallows the release that follows it.
     const int bookCount = static_cast<int>(recentBooks.size());
@@ -367,7 +369,7 @@ void HomeActivity::loop() {
       selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
       requestUpdate();
     });
-  } else if (!coverGridUi) {
+  } else if (!hasGridHome()) {
     buttonNavigator.onNext([this, menuCount] {
       selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
       requestUpdate();
@@ -399,8 +401,9 @@ void HomeActivity::loop() {
     return;
   }
 
-  if (coverGridUi) {
-    const int touched = coverGridUi->selectedAction(mappedInput);
+  if (hasGridHome()) {
+    int touched = -1;
+    onGridHome([&](auto& home) { touched = home.selectedAction(mappedInput); });
     if (touched >= 0 && touched < menuCount) {
       selectorIndex = touched;
       activateSelection();
@@ -410,7 +413,7 @@ void HomeActivity::loop() {
       activateSelection();
       return;
     }
-    if (kCoverGridFlatNav) return;
+    if (eminimalUi) return;
     // Side page buttons walk the covers, front Left/Right walk the tabs
     // (selectorIndex is flat: books first, then the tab items). A press while
     // selection sits in the other band jumps into this band first.
@@ -494,14 +497,18 @@ void HomeActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
 
   renderer.clearScreen();
-  if (coverGridUi) {
-    coverGridUi->setSelection(selectorIndex);
-    UITheme::getInstance().drawCoverGridHome(*coverGridUi);
+  if (hasGridHome()) {
+    onGridHome([&](auto& home) { home.setSelection(selectorIndex); });
+    if (eminimalUi) {
+      eminimalUi->renderUi();
+    } else {
+      UITheme::getInstance().drawCoverGridHome(*coverGridUi);
+    }
     // Front Left/Right walk the tabs, so their hints read Left/Right; the
     // side page buttons (unhinted) walk the covers. The flat walk is Up/Down.
     const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
-                                              kCoverGridFlatNav ? tr(STR_DIR_UP) : tr(STR_DIR_LEFT),
-                                              kCoverGridFlatNav ? tr(STR_DIR_DOWN) : tr(STR_DIR_RIGHT));
+                                              eminimalUi ? tr(STR_DIR_UP) : tr(STR_DIR_LEFT),
+                                              eminimalUi ? tr(STR_DIR_DOWN) : tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
                                                                    : HalDisplay::FAST_REFRESH);
@@ -509,9 +516,10 @@ void HomeActivity::render(RenderLock&&) {
     // pass, orientation switch) means the paths must point at those sizes and
     // any missing thumbs must be generated. Refreshing the paths right away
     // lets the next pass draw already-cached thumbs before generation runs.
-    const bool coverSpecChanged = coverGridUi->takeThumbHeightsChanged();
+    bool coverSpecChanged = false;
+    onGridHome([&](auto& home) { coverSpecChanged = home.takeThumbHeightsChanged(); });
     if (coverSpecChanged) {
-      coverGridUi->refreshCoverPaths();
+      onGridHome([](auto& home) { home.refreshCoverPaths(); });
       recentsLoaded = false;
     }
     if (!firstRenderDone) {
@@ -519,7 +527,7 @@ void HomeActivity::render(RenderLock&&) {
       requestUpdate();
     } else if (!recentsLoaded && !recentsLoading) {
       loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT);
-      coverGridUi->refreshCoverPaths();
+      onGridHome([](auto& home) { home.refreshCoverPaths(); });
       requestUpdate();
     }
     return;

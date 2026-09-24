@@ -11,14 +11,20 @@
 #include "components/media/book-card.h"
 #include "components/media/cover-grid.h"
 
-class CoverGridHomeUi final : public UiAppHost {
+// e-Minimal's home page: upstream's Cover Grid home (CoverGridHomeUi, left as
+// upstream ships it) redone for the 7.8" panel and a four-button board --
+// 1.5x chrome and 48 px icons, full panel width, titles under the thumbs, a
+// solid selection ring. Used only by the e-Minimal theme (HomeActivity).
+class EMinimalHomeUi final : public UiAppHost {
  public:
   static constexpr int THUMB_HEIGHT = 400;
-  static constexpr int GRID_COLUMNS = 3;
+  static constexpr int GRID_COLUMNS = 4;
   static constexpr int GRID_ROWS = 2;
   static constexpr int MAX_BOOKS = 1 + GRID_COLUMNS * GRID_ROWS;
+#if FREEINK_DEVICE_EMINIMAL  // the only device that runs this home (HomeActivity)
   static_assert(MAX_BOOKS <= HomeCoverCache::MAX_COVERS);
-  explicit CoverGridHomeUi(GfxRenderer& renderer);
+#endif
+  explicit EMinimalHomeUi(GfxRenderer& renderer);
   void begin(const std::vector<RecentBook>& books, bool hasOpds, bool hasContinueReading);
   void refreshCoverPaths();
   void setSelection(int selection) { selected = selection; }
@@ -60,6 +66,8 @@ class CoverGridHomeUi final : public UiAppHost {
   freeink::ui::BookCardProps card;
   freeink::ui::CoverGridProps grid;
   freeink::ui::Rect gridBounds{};
+  // Where bookCard painted the featured cover this frame (anchors its cursor bar).
+  freeink::ui::Rect featuredCoverRect{};
   freeink::ui::TabBarProps tabs;
   std::array<freeink::ui::TabItem, 5> tabItems;
 };
