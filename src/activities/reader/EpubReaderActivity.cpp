@@ -1619,8 +1619,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     renderer.gray4ToFrameBuffer();
     const auto tBase = millis();
 
-    const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
-    if (pagesUntilFullRefresh <= 1) {
+    // A picture page is itself a clean refresh, as every XTC picture page is:
+    // DU4 moves only the changed pixels, so the text page before it ghosted
+    // through the art (e-Minimal 7.8", 2026-09-24: text -> cached image page
+    // went DU4). ~+170 ms on picture pages only.
+    const bool cleanRefresh = pagesUntilFullRefresh <= 1 || pageHasImages;
+    const auto mode = cleanRefresh ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+    if (cleanRefresh) {
       pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
     } else {
       pagesUntilFullRefresh--;
