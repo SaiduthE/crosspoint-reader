@@ -400,16 +400,30 @@ class GfxRenderer {
   // grayscale page. Layout and gating: HalDisplay::displayGray4 (physical
   // orientation, getDisplayWidthBytes()*4-byte rows, left pixel in the high
   // nibble). Returns false, having done nothing, where unsupported.
+  // updateFrameBuffer: the live 1bpp framebuffer receives the page's B/W base
+  // (white iff the nibble is 0xF, what gray4ToFrameBuffer() builds) as the
+  // driver derives it during the load, so no rebuild afterwards.
   bool supportsGray4() const;
-  bool displayGray4Buffer(const uint8_t* fb4, HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  bool displayGray4Buffer(const uint8_t* fb4, HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH,
+                          bool updateFrameBuffer = false) const;
+  // The same page one row at a time, no frame needed: `fill` is called once
+  // per physical row 0 .. getDisplayHeight()-1, in order, on this task, and
+  // writes that row (getDisplayWidthBytes() * 4 bytes, the displayGray4Buffer
+  // layout) into dst -- internal RAM, valid for that call only. It must not
+  // block or allocate: the row is built while the previous chunk is on the
+  // wire. Same refresh-mode, promoted-refresh and bookkeeping behaviour as
+  // displayGray4Buffer; false, fill never called, where unsupported.
+  bool displayGray4Rows(HalDisplay::Gray4RowFill fill, void* ctx, HalDisplay::RefreshMode refreshMode,
+                        bool updateFrameBuffer = false) const;
 
   // 16-level render target (only where supportsGray4()). Render a grey page
   // once, straight to 4bpp:
   //   if (renderer.beginGray4Target(aa)) {   // false: use the plane path
   //     ...draw the page (B/W semantics; renderMode stays BW)...
   //     renderer.endGray4Target();
-  //     renderer.gray4ToFrameBuffer();        // 1bpp base for later B/W draws
-  //     renderer.displayGray4Buffer(renderer.getGray4Buffer(), mode);
+  //     if (!renderer.displayGray4Buffer(renderer.getGray4Buffer(), mode,
+  //                                      /*updateFrameBuffer=*/true))  // 1bpp base for later B/W draws
+  //       renderer.gray4ToFrameBuffer();                              // refused: build it here
   //     renderer.releaseGray4Target();
   //   }
   // begin allocates the PSRAM frame (getGray4BufferSize(), ~1.3 MB on the
@@ -437,8 +451,10 @@ class GfxRenderer {
   size_t getGray4BufferSize() const;
   // Rebuild the 1bpp framebuffer from the held 4bpp frame: white iff the
   // nibble is 0xF, else black -- the B/W base the plane path would have
-  // rendered, and exactly what the IT8951 driver re-derives as its own base,
-  // so later B/W overlays diff cleanly.
+  // rendered, and exactly what the IT8951 driver derives as its own base (and
+  // hands back through displayGray4Buffer's updateFrameBuffer), so later B/W
+  // overlays diff cleanly. For the refused-frame fallback: a shown frame gets
+  // the same base from the driver for free.
   void gray4ToFrameBuffer() const;
   // Active input encoding, used when drawing monochrome overlays into planes.
   bool grayPlanesAreAbsolute() const { return absoluteGrayPlanes; }

@@ -160,8 +160,13 @@ bool HalDisplay::supportsGray4() const { return einkDisplay.supportsGray4(); }
 
 uint32_t HalDisplay::getGray4BufferSize() const { return einkDisplay.gray4BufferSize(); }
 
-bool HalDisplay::displayGray4(const uint8_t* fb4, RefreshMode mode, bool turnOffScreen) {
-  return einkDisplay.displayGray4(fb4, convertRefreshMode(mode), turnOffScreen);
+bool HalDisplay::displayGray4(const uint8_t* fb4, RefreshMode mode, bool turnOffScreen, bool updateFrameBuffer) {
+  return einkDisplay.displayGray4(fb4, convertRefreshMode(mode), turnOffScreen, updateFrameBuffer);
+}
+
+bool HalDisplay::displayGray4Rows(Gray4RowFill fill, void* ctx, RefreshMode mode, bool turnOffScreen,
+                                  bool updateFrameBuffer) {
+  return einkDisplay.displayGray4Rows(fill, ctx, convertRefreshMode(mode), turnOffScreen, updateFrameBuffer);
 }
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }

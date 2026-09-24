@@ -2372,9 +2372,16 @@ void GfxRenderer::displayGrayBuffer() const {
 
 bool GfxRenderer::supportsGray4() const { return display.supportsGray4(); }
 
-bool GfxRenderer::displayGray4Buffer(const uint8_t* fb4, HalDisplay::RefreshMode refreshMode) const {
+bool GfxRenderer::displayGray4Buffer(const uint8_t* fb4, HalDisplay::RefreshMode refreshMode,
+                                     const bool updateFrameBuffer) const {
   if (!display.supportsGray4()) return false;  // leave a promoted refresh for the fallback path
-  return display.displayGray4(fb4, applyPromotedRefresh(refreshMode), fadingFix);
+  return display.displayGray4(fb4, applyPromotedRefresh(refreshMode), fadingFix, updateFrameBuffer);
+}
+
+bool GfxRenderer::displayGray4Rows(HalDisplay::Gray4RowFill fill, void* ctx, HalDisplay::RefreshMode refreshMode,
+                                   const bool updateFrameBuffer) const {
+  if (!display.supportsGray4()) return false;  // as above
+  return display.displayGray4Rows(fill, ctx, applyPromotedRefresh(refreshMode), fadingFix, updateFrameBuffer);
 }
 
 size_t GfxRenderer::getGray4BufferSize() const { return display.getGray4BufferSize(); }

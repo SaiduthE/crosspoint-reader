@@ -133,9 +133,23 @@ class HalDisplay {
   // rotation), packed rows of getDisplayWidthBytes() * 4 bytes, two pixels per
   // byte with the left pixel in the high nibble, 0x0 black .. 0xF white;
   // getGray4BufferSize() bytes in all. PSRAM is fine; read only, not retained.
+  // updateFrameBuffer: the live 1bpp framebuffer receives the page's B/W base
+  // (white iff the nibble is 0xF -- the base the driver derives for its own
+  // differential bookkeeping) as the frame is loaded.
   bool supportsGray4() const;
   uint32_t getGray4BufferSize() const;
-  bool displayGray4(const uint8_t* fb4, RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
+  bool displayGray4(const uint8_t* fb4, RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false,
+                    bool updateFrameBuffer = false);
+  // The same page one row at a time, no frame needed: fill(ctx, row, dst) is
+  // called once per physical row 0 .. getDisplayHeight()-1, in order, on the
+  // calling task, and writes that row (getDisplayWidthBytes() * 4 bytes, the
+  // displayGray4 layout) into dst -- internal RAM, valid for that call only.
+  // It must not block or allocate: the row is built while the previous chunk
+  // is on the wire. Otherwise as displayGray4; false, fill never called, where
+  // unsupported.
+  using Gray4RowFill = void (*)(void* ctx, uint16_t row, uint8_t* dst);
+  bool displayGray4Rows(Gray4RowFill fill, void* ctx, RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false,
+                        bool updateFrameBuffer = false);
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

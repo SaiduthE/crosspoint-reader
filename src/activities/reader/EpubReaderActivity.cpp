@@ -1614,9 +1614,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     const auto tRender = millis();
 
     // The 1bpp framebuffer must still hold the page: overlays (toolbar menu,
-    // popups) draw on it and B/W-refresh against the driver's base, which the
-    // driver re-derives from this same frame by the same rule (white iff 0xF).
-    renderer.gray4ToFrameBuffer();
+    // popups) draw on it and B/W-refresh against the driver's base. The driver
+    // derives that base from this same frame (white iff 0xF) while the rows
+    // stream out, and hands it back into the framebuffer (updateFrameBuffer
+    // below), so the host-side rebuild -- 111-136 ms a page (2026-09-24) -- is
+    // gone; base= stays in the log to show it.
     const auto tBase = millis();
 
     // A picture page is itself a clean refresh, as every XTC picture page is:
@@ -1633,7 +1635,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // A dithered picture driven differentially leaves the heaviest residue;
     // make the next page a clean refresh (see the combined-base path).
     if (pageHasImages) pagesUntilFullRefresh = 1;
-    const bool shown = renderer.displayGray4Buffer(renderer.getGray4Buffer(), mode);
+    const bool shown = renderer.displayGray4Buffer(renderer.getGray4Buffer(), mode, /*updateFrameBuffer=*/true);
+    // Refused: the framebuffer gets the page the slow way, while the frame is
+    // still held.
+    if (!shown) renderer.gray4ToFrameBuffer();
     renderer.releaseGray4Target();
     if (!shown) {
       LOG_ERR("ERS", "gray4 display refused; showing the page B/W");
