@@ -5,8 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 READER_FONT_STYLES=("Regular" "Italic" "Bold" "BoldItalic")
-# 20-24 are the e-Minimal 7.8" set (18-24, ~226 DPI); see builtinFonts/all.h.
-NOTOSERIF_FONT_SIZES=(12 14 16 18 20 22 24)
+NOTOSERIF_FONT_SIZES=(12 14 16 18)
 NOTOSANS_FONT_SIZES=(12 14 16 18)
 
 for size in ${NOTOSERIF_FONT_SIZES[@]}; do
@@ -85,6 +84,42 @@ python fontconvert.py notosans_8_regular 8 \
   ../builtinFonts/source/NotoSansHebrew/NotoSansHebrew-Regular.ttf \
   ../builtinFonts/source/NotoSansArabic/NotoSansArabic-Regular.ttf \
   --additional-intervals 0x05D0,0x05EA "${ARABIC_INTERVALS[@]}" > ../builtinFonts/notosans_8_regular.h
+
+# e-Minimal 7.8" (~226 DPI): English + numbers, symbols and special characters
+# only, for both the reader and the UI -- Basic Latin, Latin-1 and the few
+# Windows-1252 extras, punctuation, super/subscripts, currency, letterlike,
+# number forms, arrows, math, combining marks and the fi/fl ligatures. No
+# Latin Extended, Vietnamese, Cyrillic, Hebrew or Arabic (the SD card carries
+# other scripts). Only builtinFonts/all.h under FREEINK_DEVICE_EMINIMAL
+# includes these; the stock sets above are untouched.
+EMINIMAL_INTERVALS=(--no-default-intervals)
+for range in 0x0020,0x007E 0x00A0,0x00FF 0x0152,0x0153 0x0160,0x0161 0x0178,0x0178              0x017D,0x017E 0x0192,0x0192 0x02C6,0x02C6 0x02DC,0x02DC 0x0300,0x036F              0x2000,0x206F 0x2070,0x209F 0x20A0,0x20CF 0x2100,0x214F 0x2150,0x218F              0x2190,0x21FF 0x2200,0x22FF 0xFB00,0xFB06 0xFFFD,0xFFFD; do
+  EMINIMAL_INTERVALS+=(--additional-intervals $range)
+done
+
+# Reader: NotoSerif 18/20/22/24 pt, 4 styles, as notoserif_en_* (18 pt is also
+# a stock size, so the e-Minimal set keeps its own names).
+for size in 18 20 22 24; do
+  for style in ${READER_FONT_STYLES[@]}; do
+    font_name="notoserif_en_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
+    python fontconvert.py $font_name $size ../builtinFonts/source/NotoSerif/NotoSerif-${style}.ttf       --2bit --compress --pnum --zopfli "${EMINIMAL_INTERVALS[@]}" > ../builtinFonts/${font_name}.h
+    echo "Generated ../builtinFonts/${font_name}.h"
+  done
+done
+
+# UI: Ubuntu 20/24 (2x the stock 10/12), NotoSans 16 small, NotoSans 12 for the
+# button legends.
+for size in 20 24; do
+  for style in ${UI_FONT_STYLES[@]}; do
+    font_name="ubuntu_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
+    python fontconvert.py $font_name $size ../builtinFonts/source/Ubuntu/Ubuntu-${style}.ttf       "${EMINIMAL_INTERVALS[@]}" > ../builtinFonts/${font_name}.h
+    echo "Generated ../builtinFonts/${font_name}.h"
+  done
+done
+for size in 16 12; do
+  python fontconvert.py notosans_${size}_small $size ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf     "${EMINIMAL_INTERVALS[@]}" > ../builtinFonts/notosans_${size}_small.h
+  echo "Generated ../builtinFonts/notosans_${size}_small.h"
+done
 
 echo ""
 echo "Running compression verification..."

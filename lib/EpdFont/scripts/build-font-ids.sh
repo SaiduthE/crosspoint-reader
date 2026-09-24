@@ -46,28 +46,28 @@ ruby -rdigest -e 'puts [
 
 echo "#define NOTOSERIF_20_FONT_ID ($(
 ruby -rdigest -e 'puts [
-  "./notoserif_20_regular.h",
-  "./notoserif_20_bold.h",
-  "./notoserif_20_bolditalic.h",
-  "./notoserif_20_italic.h",
+  "./notoserif_en_20_regular.h",
+  "./notoserif_en_20_bold.h",
+  "./notoserif_en_20_bolditalic.h",
+  "./notoserif_en_20_italic.h",
 ].map{|f| Digest::SHA256.hexdigest(File.read(f)).to_i(16) }.sum % (2 ** 32) - (2 ** 31)'
 ))"
 
 echo "#define NOTOSERIF_22_FONT_ID ($(
 ruby -rdigest -e 'puts [
-  "./notoserif_22_regular.h",
-  "./notoserif_22_bold.h",
-  "./notoserif_22_bolditalic.h",
-  "./notoserif_22_italic.h",
+  "./notoserif_en_22_regular.h",
+  "./notoserif_en_22_bold.h",
+  "./notoserif_en_22_bolditalic.h",
+  "./notoserif_en_22_italic.h",
 ].map{|f| Digest::SHA256.hexdigest(File.read(f)).to_i(16) }.sum % (2 ** 32) - (2 ** 31)'
 ))"
 
 echo "#define NOTOSERIF_24_FONT_ID ($(
 ruby -rdigest -e 'puts [
-  "./notoserif_24_regular.h",
-  "./notoserif_24_bold.h",
-  "./notoserif_24_bolditalic.h",
-  "./notoserif_24_italic.h",
+  "./notoserif_en_24_regular.h",
+  "./notoserif_en_24_bold.h",
+  "./notoserif_en_24_bolditalic.h",
+  "./notoserif_en_24_italic.h",
 ].map{|f| Digest::SHA256.hexdigest(File.read(f)).to_i(16) }.sum % (2 ** 32) - (2 ** 31)'
 ))"
 

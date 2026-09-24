@@ -77,28 +77,28 @@ static bool wakePowerReleasePending = false;
 // Fonts
 #if FREEINK_DEVICE_EMINIMAL
 // Reader fonts: NotoSerif 18-24 pt only, sized for the 7.8" panel (builtinFonts/all.h).
-EpdFont notoserif18RegularFont(&notoserif_18_regular);
-EpdFont notoserif18BoldFont(&notoserif_18_bold);
-EpdFont notoserif18ItalicFont(&notoserif_18_italic);
-EpdFont notoserif18BoldItalicFont(&notoserif_18_bolditalic);
+EpdFont notoserif18RegularFont(&notoserif_en_18_regular);
+EpdFont notoserif18BoldFont(&notoserif_en_18_bold);
+EpdFont notoserif18ItalicFont(&notoserif_en_18_italic);
+EpdFont notoserif18BoldItalicFont(&notoserif_en_18_bolditalic);
 EpdFontFamily notoserif18FontFamily(&notoserif18RegularFont, &notoserif18BoldFont, &notoserif18ItalicFont,
                                     &notoserif18BoldItalicFont);
-EpdFont notoserif20RegularFont(&notoserif_20_regular);
-EpdFont notoserif20BoldFont(&notoserif_20_bold);
-EpdFont notoserif20ItalicFont(&notoserif_20_italic);
-EpdFont notoserif20BoldItalicFont(&notoserif_20_bolditalic);
+EpdFont notoserif20RegularFont(&notoserif_en_20_regular);
+EpdFont notoserif20BoldFont(&notoserif_en_20_bold);
+EpdFont notoserif20ItalicFont(&notoserif_en_20_italic);
+EpdFont notoserif20BoldItalicFont(&notoserif_en_20_bolditalic);
 EpdFontFamily notoserif20FontFamily(&notoserif20RegularFont, &notoserif20BoldFont, &notoserif20ItalicFont,
                                     &notoserif20BoldItalicFont);
-EpdFont notoserif22RegularFont(&notoserif_22_regular);
-EpdFont notoserif22BoldFont(&notoserif_22_bold);
-EpdFont notoserif22ItalicFont(&notoserif_22_italic);
-EpdFont notoserif22BoldItalicFont(&notoserif_22_bolditalic);
+EpdFont notoserif22RegularFont(&notoserif_en_22_regular);
+EpdFont notoserif22BoldFont(&notoserif_en_22_bold);
+EpdFont notoserif22ItalicFont(&notoserif_en_22_italic);
+EpdFont notoserif22BoldItalicFont(&notoserif_en_22_bolditalic);
 EpdFontFamily notoserif22FontFamily(&notoserif22RegularFont, &notoserif22BoldFont, &notoserif22ItalicFont,
                                     &notoserif22BoldItalicFont);
-EpdFont notoserif24RegularFont(&notoserif_24_regular);
-EpdFont notoserif24BoldFont(&notoserif_24_bold);
-EpdFont notoserif24ItalicFont(&notoserif_24_italic);
-EpdFont notoserif24BoldItalicFont(&notoserif_24_bolditalic);
+EpdFont notoserif24RegularFont(&notoserif_en_24_regular);
+EpdFont notoserif24BoldFont(&notoserif_en_24_bold);
+EpdFont notoserif24ItalicFont(&notoserif_en_24_italic);
+EpdFont notoserif24BoldItalicFont(&notoserif_en_24_bolditalic);
 EpdFontFamily notoserif24FontFamily(&notoserif24RegularFont, &notoserif24BoldFont, &notoserif24ItalicFont,
                                     &notoserif24BoldItalicFont);
 #else
@@ -158,19 +158,19 @@ EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, 
 
 #if FREEINK_DEVICE_EMINIMAL
 // e-Minimal 7.8" (uiScale 1.5): the UI font slots are a tier, not a size, so
-// the 1.5x fonts are registered under the same IDs the theme already draws
-// with (UI_10 -> 15 px, UI_12 -> 18 px, small 8 -> 12 px). Row heights and
+// the 2x fonts are registered under the same IDs the theme already draws
+// with (UI_10 -> 20 px, UI_12 -> 24 px, small 8 -> 16 px). Row heights and
 // headers derive from the body font's line height, so the chrome scales with
 // them. The three families are only compiled in for this device (all.h).
-EpdFont smallFont(&notosans_12_small);
+EpdFont smallFont(&notosans_16_small);
 EpdFontFamily smallFontFamily(&smallFont);
 
-EpdFont ui10RegularFont(&ubuntu_15_regular);
-EpdFont ui10BoldFont(&ubuntu_15_bold);
+EpdFont ui10RegularFont(&ubuntu_20_regular);
+EpdFont ui10BoldFont(&ubuntu_20_bold);
 EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
 
-EpdFont ui12RegularFont(&ubuntu_18_regular);
-EpdFont ui12BoldFont(&ubuntu_18_bold);
+EpdFont ui12RegularFont(&ubuntu_24_regular);
+EpdFont ui12BoldFont(&ubuntu_24_bold);
 EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 #else
 EpdFont smallFont(&notosans_8_regular);
