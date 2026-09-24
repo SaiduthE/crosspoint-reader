@@ -188,10 +188,19 @@ inline std::vector<StrId> buildLongPressMenuValues() {
 }
 
 inline std::vector<StrId> homeThemeValues() {
+#if FREEINK_DEVICE_EMINIMAL
+  // e-Minimal's own theme, listed on this device only. The board has PSRAM,
+  // so Cover Grid before it is always offered and the indices stay aligned.
+  static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC,     StrId::STR_THEME_LYRA,
+                                     StrId::STR_THEME_LYRA_EXTENDED, StrId::STR_THEME_ROUNDEDRAFF,
+                                     StrId::STR_THEME_COVER_GRID,  StrId::STR_THEME_EMINIMAL};
+  return {VALUES, VALUES + std::size(VALUES)};
+#else
   static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                                      StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_COVER_GRID};
   const size_t count = UITheme::supportsCoverGrid() ? std::size(VALUES) : std::size(VALUES) - 1;
   return {VALUES, VALUES + count};
+#endif
 }
 
 // Shared settings list used by both the device settings UI and the web settings API.
@@ -243,9 +252,6 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
                            StrId::STR_PAGES_30, StrId::STR_NEVER},
                           "refreshFrequency", StrId::STR_CAT_DISPLAY),
-        SettingInfo::Enum(StrId::STR_PICTURE_CLEANUP, &CrossPointSettings::pictureCleanup,
-                          {StrId::STR_STATE_OFF, StrId::STR_CLEANUP_DOUBLE, StrId::STR_CLEANUP_WHITE_FLASH},
-                          "pictureCleanup", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, homeThemeValues(), "uiTheme",
                           StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
@@ -315,6 +321,9 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                           {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                           "imageRendering", StrId::STR_CAT_READER),
+        SettingInfo::Enum(StrId::STR_PICTURE_CLEANUP, &CrossPointSettings::pictureCleanup,
+                          {StrId::STR_STATE_OFF, StrId::STR_CLEANUP_DOUBLE, StrId::STR_CLEANUP_WHITE_FLASH},
+                          "pictureCleanup", StrId::STR_CAT_READER),
         SettingInfo::Enum(StrId::STR_READER_MENU_STYLE, &CrossPointSettings::readerMenuStyle,
                           {StrId::STR_MENU_STYLE_LIST, StrId::STR_MENU_STYLE_TOOLBAR}, "readerMenuStyle",
                           StrId::STR_CAT_READER),

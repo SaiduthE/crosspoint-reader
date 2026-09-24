@@ -223,6 +223,13 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // Font family — uses dynamic getter/setter in SettingsList so the generic loop skips it.
   const uint8_t storedFontFamily = doc["fontFamily"] | (uint8_t)0;
   fontFamily = clamp(storedFontFamily, BUILTIN_FONT_COUNT, 0);
+#if FREEINK_DEVICE_EMINIMAL
+  // No built-in Noto Sans on this device (builtinFonts/all.h).
+  if (fontFamily == NOTOSANS) {
+    fontFamily = NOTOSERIF;
+    needsResave = true;
+  }
+#endif
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
     static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync, HomeButtonAction::Ignore,
@@ -400,6 +407,19 @@ int CrossPointSettings::getReaderFontId() const {
   // in the page render loop) so rendering is correct even before it has run.
   const uint8_t pt =
       snapToNearestPointSize(BUILTIN_READER_POINT_SIZES, std::size(BUILTIN_READER_POINT_SIZES), fontPointSize);
+#if FREEINK_DEVICE_EMINIMAL
+  switch (pt) {
+    case 18:
+      return NOTOSERIF_18_FONT_ID;
+    case 22:
+      return NOTOSERIF_22_FONT_ID;
+    case 24:
+      return NOTOSERIF_24_FONT_ID;
+    case 20:
+    default:
+      return NOTOSERIF_20_FONT_ID;
+  }
+#else
   const bool sans = (fontFamily == NOTOSANS);
   switch (pt) {
     case 12:
@@ -412,4 +432,5 @@ int CrossPointSettings::getReaderFontId() const {
     default:
       return sans ? NOTOSANS_14_FONT_ID : NOTOSERIF_14_FONT_ID;
   }
+#endif
 }

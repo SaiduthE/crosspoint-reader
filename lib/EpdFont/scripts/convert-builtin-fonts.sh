@@ -5,7 +5,8 @@ set -e
 cd "$(dirname "$0")"
 
 READER_FONT_STYLES=("Regular" "Italic" "Bold" "BoldItalic")
-NOTOSERIF_FONT_SIZES=(12 14 16 18)
+# 20-24 are the e-Minimal 7.8" set (18-24, ~226 DPI); see builtinFonts/all.h.
+NOTOSERIF_FONT_SIZES=(12 14 16 18 20 22 24)
 NOTOSANS_FONT_SIZES=(12 14 16 18)
 
 for size in ${NOTOSERIF_FONT_SIZES[@]}; do

@@ -12,8 +12,13 @@
 // .cpfont files a user installed for an SD family.
 
 // The built-in Noto Serif / Noto Sans families are compiled in at exactly these
-// point sizes (see the global font objects in main.cpp).
+// point sizes (see the global font objects in main.cpp). e-Minimal ships Noto
+// Serif alone, sized for its ~226 DPI panel (builtinFonts/all.h).
+#if FREEINK_DEVICE_EMINIMAL
+inline constexpr uint8_t BUILTIN_READER_POINT_SIZES[] = {18, 20, 22, 24};
+#else
 inline constexpr uint8_t BUILTIN_READER_POINT_SIZES[] = {12, 14, 16, 18};
+#endif
 
 // Point sizes selectable for the active reader font, ascending: the SD family's
 // installed sizes when `sdFamilyName` names one the registry knows, otherwise

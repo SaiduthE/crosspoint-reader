@@ -75,6 +75,33 @@ constexpr unsigned long POWER_MENU_HOLD_MS = 700;
 static bool wakePowerReleasePending = false;
 
 // Fonts
+#if FREEINK_DEVICE_EMINIMAL
+// Reader fonts: NotoSerif 18-24 pt only, sized for the 7.8" panel (builtinFonts/all.h).
+EpdFont notoserif18RegularFont(&notoserif_18_regular);
+EpdFont notoserif18BoldFont(&notoserif_18_bold);
+EpdFont notoserif18ItalicFont(&notoserif_18_italic);
+EpdFont notoserif18BoldItalicFont(&notoserif_18_bolditalic);
+EpdFontFamily notoserif18FontFamily(&notoserif18RegularFont, &notoserif18BoldFont, &notoserif18ItalicFont,
+                                    &notoserif18BoldItalicFont);
+EpdFont notoserif20RegularFont(&notoserif_20_regular);
+EpdFont notoserif20BoldFont(&notoserif_20_bold);
+EpdFont notoserif20ItalicFont(&notoserif_20_italic);
+EpdFont notoserif20BoldItalicFont(&notoserif_20_bolditalic);
+EpdFontFamily notoserif20FontFamily(&notoserif20RegularFont, &notoserif20BoldFont, &notoserif20ItalicFont,
+                                    &notoserif20BoldItalicFont);
+EpdFont notoserif22RegularFont(&notoserif_22_regular);
+EpdFont notoserif22BoldFont(&notoserif_22_bold);
+EpdFont notoserif22ItalicFont(&notoserif_22_italic);
+EpdFont notoserif22BoldItalicFont(&notoserif_22_bolditalic);
+EpdFontFamily notoserif22FontFamily(&notoserif22RegularFont, &notoserif22BoldFont, &notoserif22ItalicFont,
+                                    &notoserif22BoldItalicFont);
+EpdFont notoserif24RegularFont(&notoserif_24_regular);
+EpdFont notoserif24BoldFont(&notoserif_24_bold);
+EpdFont notoserif24ItalicFont(&notoserif_24_italic);
+EpdFont notoserif24BoldItalicFont(&notoserif_24_bolditalic);
+EpdFontFamily notoserif24FontFamily(&notoserif24RegularFont, &notoserif24BoldFont, &notoserif24ItalicFont,
+                                    &notoserif24BoldItalicFont);
+#else
 EpdFont notoserif14RegularFont(&notoserif_14_regular);
 EpdFont notoserif14BoldFont(&notoserif_14_bold);
 EpdFont notoserif14ItalicFont(&notoserif_14_italic);
@@ -127,6 +154,7 @@ EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, 
                                    &notosans18BoldItalicFont);
 
 #endif  // OMIT_FONTS
+#endif  // FREEINK_DEVICE_EMINIMAL
 
 #if FREEINK_DEVICE_EMINIMAL
 // e-Minimal 7.8" (uiScale 1.5): the UI font slots are a tier, not a size, so
@@ -349,6 +377,12 @@ void setupDisplayAndFonts(bool seamless = false) {
   }
   fontCacheManager.setFontDecompressor(&fontDecompressor);
   renderer.setFontCacheManager(&fontCacheManager);
+#if FREEINK_DEVICE_EMINIMAL
+  renderer.insertFont(NOTOSERIF_20_FONT_ID, notoserif20FontFamily);
+  renderer.insertFont(NOTOSERIF_18_FONT_ID, notoserif18FontFamily);
+  renderer.insertFont(NOTOSERIF_22_FONT_ID, notoserif22FontFamily);
+  renderer.insertFont(NOTOSERIF_24_FONT_ID, notoserif24FontFamily);
+#else
   renderer.insertFont(NOTOSERIF_14_FONT_ID, notoserif14FontFamily);
 #ifndef OMIT_FONTS
   renderer.insertFont(NOTOSERIF_12_FONT_ID, notoserif12FontFamily);
@@ -360,6 +394,7 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
   renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
 #endif  // OMIT_FONTS
+#endif  // FREEINK_DEVICE_EMINIMAL
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
@@ -692,6 +727,16 @@ void loop() {
         } else {
           logSerial.printf("METRIC unknown: %s (CMD:METRICS lists them)\n", name.c_str());
         }
+      } else if (cmd == "MEM") {
+        // Bench memory snapshot (font A/B comparisons): internal heap and
+        // PSRAM free now, the low-water mark since boot, and the largest block.
+        logSerial.printf("MEM heap free %u min %u maxblock %u | psram free %u min %u maxblock %u\n",
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                         (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM),
+                         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
       }
     }
   }

@@ -32,6 +32,11 @@ class UITheme {
                                       int maxLines, bool black = true,
                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                                       TextVerticalAlignment verticalAlignment = TextVerticalAlignment::CENTER);
+  // The factor getMetrics() scales the pixel metrics by: the board's uiScale
+  // where the UI fonts follow it (e-Minimal), 1 elsewhere. scaledPx() applies
+  // it to a hand-placed size that is not in ThemeMetrics.
+  static float chromeScale();
+  static int scaledPx(int px);
   static bool supportsCoverGrid();
   static bool hasCoverGridHome();
   static void drawCoverGridHome(CoverGridHomeUi& home);

@@ -432,7 +432,8 @@ void LibraryListActivity::openSearch() {
     applyFilter();
     auto& nav = activeNav();
     if (!query.empty() && filteredCount == 0 && !degraded) {
-      // Up from the tab bar reopens Search even with no results.
+      // Nothing matched: stay on the tab bar, where Back clears the search
+      // and a Confirm hold reopens it.
       nav.selected = 0;
     } else {
       // A non-empty result belongs to the list: land on
@@ -445,6 +446,14 @@ void LibraryListActivity::openSearch() {
 }
 
 void LibraryListActivity::stepTab(const int direction) {
+  // A degraded index draws no strip and offers no sort: ring 0 is only the
+  // resting position above the rows, so Up/Down there enter the list (first
+  // or last row) instead of switching to a sort the index cannot back.
+  if (degraded) {
+    const int count = listCount();
+    if (count > 0) moveRingTo(direction > 0 ? 1 : count);
+    return;
+  }
   const int next = (activeTab() + (direction > 0 ? 1 : TAB_SLOTS - 1)) % TAB_SLOTS;
   selectTab(next, false);
 }
@@ -712,7 +721,7 @@ bool LibraryListActivity::handleButtons() {
   // the freshly opened confirmation and select its default.
   if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, LONG_PRESS_MS)) {
     if (tabsFocused()) {
-      if (!degraded) toggleSortDirection();
+      if (!degraded) showTabBarOptions();
     } else if (isRecentSort(sortOrder)) {
       showRecentBookOptions(selectedEntry());
     } else if (deleteEligible()) {
@@ -746,46 +755,34 @@ bool LibraryListActivity::handleButtons() {
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (tabsFocused()) {
-      stepTab(1);
+      // Settings model: Up/Down choose the tab, Confirm opens it.
+      enterList();
       return true;
     }
     if (count > 0) activateIndex(selectedEntry());
     return true;
   }
 
+  // Up/Down come from UiTabListActivity::navigateButtons(), the Settings
+  // model: on the strip they step the tab, in the rows they loop the rows only
+  // (never onto the strip), and a hold repeats the step.
   return false;
 }
 
-void LibraryListActivity::navigateButtons() {
-  const int count = listCount();
-  auto& nav = activeNav();
-  buttonNavigator.onNextRelease([this, count] {
-    if (count > 0) moveRingTo(ringPos() == count ? 1 : ringPos() + 1);
-  });
-  buttonNavigator.onPreviousRelease([this, count] {
-    if (tabsFocused() && !degraded) {
+// Long-press Confirm on the tab strip: the strip's two extra actions. Search
+// used to be Up on the strip, which now steps the tab like Settings does.
+void LibraryListActivity::showTabBarOptions() {
+  static constexpr StrId OPTIONS[] = {StrId::STR_LIBRARY_SEARCH, StrId::STR_LIBRARY_REVERSE_SORT};
+  app.clearTapFlash();
+  optionPopup.show(StrId::STR_LIBRARY, OPTIONS, 2, 0, [this](const int choice) {
+    swallowHeldReleases();
+    if (choice == 0) {
       openSearch();
-    } else if (count > 0) {
-      moveRingTo(ringPos() <= 1 ? count : ringPos() - 1);
+    } else if (choice == 1) {
+      toggleSortDirection();
     }
   });
-  // A held button steps tabs while the strip has focus (the base behaviour
-  // Settings keeps) and page-jumps once the selection is down in the rows,
-  // where fast travel through a long shelf is what a hold means.
-  buttonNavigator.onNextContinuous([this, count, &nav] {
-    if (tabsFocused()) {
-      stepTab(1);
-    } else if (count > 0) {
-      moveRingTo(ButtonNavigator::nextPageIndex(selectedEntry(), count, nav.pageRows()) + 1);
-    }
-  });
-  buttonNavigator.onPreviousContinuous([this, count, &nav] {
-    if (tabsFocused()) {
-      stepTab(-1);
-    } else if (count > 0) {
-      moveRingTo(ButtonNavigator::previousPageIndex(selectedEntry(), count, nav.pageRows()) + 1);
-    }
-  });
+  requestUpdate();
 }
 
 void LibraryListActivity::buildRows(UiScreen& screen) {
@@ -985,7 +982,7 @@ void LibraryListActivity::drawHoldHelp() const {
   if (mappedInput.hasTouch() || groupsCollapsed) return;
   const char* help = nullptr;
   if (tabsFocused() && !degraded)
-    help = tr(STR_LIBRARY_HOLD_SORT);
+    help = tr(STR_LIBRARY_HOLD_OPTIONS);  // strip: hold opens Search / Reverse sort
   else if (!tabsFocused() && isRecentSort(sortOrder) && listCount() > 0)
     help = tr(STR_LIBRARY_HOLD_OPTIONS);  // recent rows: hold opens the row menu
   else if (!tabsFocused() && deleteEligible() && listCount() > 0)
@@ -1011,11 +1008,10 @@ void LibraryListActivity::drawFooter() {
   drawPositionReadout();
   drawHoldHelp();
 
-  const bool backGoesHome = tabsFocused() && !groupsCollapsed && query.empty();
-  const char* backLabel = backGoesHome ? tr(STR_HOME) : tr(STR_BACK);
-  const char* confirmLabel = groupsCollapsed ? tr(STR_SELECT) : tr(STR_OPEN);
-  const bool canSearch = tabsFocused() && !degraded;
-  const auto labels = mappedInput.mapLabels(backLabel, tabsFocused() ? tr(STR_TOGGLE) : confirmLabel,
-                                            canSearch ? tr(STR_SEARCH) : tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  // Settings' hint set: Back / Open / Up / Down on the strip (Up/Down choose
+  // the tab, Confirm opens it); in the rows Confirm opens a book, or selects a
+  // collapsed group.
+  const char* confirmLabel = (!tabsFocused() && groupsCollapsed) ? tr(STR_SELECT) : tr(STR_OPEN);
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }

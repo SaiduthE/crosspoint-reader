@@ -49,8 +49,9 @@ class LibraryListActivity final : public UiTabListActivity {
   void onTabAction(int index) override;
   void stepTab(int direction) override;
   bool handleCustomInput() override;
+  // Up/Down use the base UiTabListActivity::navigateButtons() (the Settings
+  // model); handleButtons() owns Confirm and Back only.
   bool handleButtons() override;
-  void navigateButtons() override;
   // The FreeInkUI header owns both the title and search touch target.
   void drawChrome() override {}
   void drawFooter() override;
@@ -77,6 +78,8 @@ class LibraryListActivity final : public UiTabListActivity {
   void resetAfterRebuild();
   // Recent-row long-press menu: open / remove from recents / delete / rebuild.
   void showRecentBookOptions(int entry);
+  // Tab-strip long-press menu: Search / Reverse sort.
+  void showTabBarOptions();
   void promptRemoveRecentBook(const std::string& path, const std::string& title);
   // Long-press delete owns the gesture where grouping does not apply: the
   // Recent sort, degraded lists, and any active search result.

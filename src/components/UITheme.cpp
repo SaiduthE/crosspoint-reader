@@ -17,6 +17,7 @@
 #include "RecentBooksStore.h"
 #include "components/CoverGridHomeUi.h"
 #include "components/themes/BaseTheme.h"
+#include "components/themes/eminimal/EMinimalTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "components/themes/roundedraff/RoundedRaffTheme.h"
@@ -33,9 +34,24 @@ void UITheme::reload() {
   setTheme(themeType);
 }
 
+float UITheme::chromeScale() {
+#if FREEINK_DEVICE_EMINIMAL
+  // Tied to the 1.5x font tier main.cpp registers for this device; the touch
+  // boards carry a uiScale too but keep the stock fonts, so they stay as is.
+  return BoardConfig::ACTIVE.uiScale;
+#else
+  return 1.0f;
+#endif
+}
+
+int UITheme::scaledPx(const int px) { return static_cast<int>(std::lround(px * chromeScale())); }
+
 bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes > 0; }
 
-bool UITheme::hasCoverGridHome() { return SETTINGS.uiTheme == CrossPointSettings::COVER_GRID && supportsCoverGrid(); }
+bool UITheme::hasCoverGridHome() {
+  return (SETTINGS.uiTheme == CrossPointSettings::COVER_GRID || SETTINGS.uiTheme == CrossPointSettings::EMINIMAL) &&
+         supportsCoverGrid();
+}
 
 void UITheme::drawCoverGridHome(CoverGridHomeUi& home) { home.renderUi(); }
 
@@ -64,6 +80,12 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     case CrossPointSettings::UI_THEME::ROUNDEDRAFF:
       LOG_DBG("UI", "Using RoundedRaff theme");
       currentTheme = std::make_unique<RoundedRaffTheme>();
+      currentMetrics = &RoundedRaffMetrics::values;
+      break;
+    case CrossPointSettings::UI_THEME::EMINIMAL:
+      // RoundedRaff's metrics table, deliberately: see EMinimalTheme.h.
+      LOG_DBG("UI", "Using e-Minimal theme");
+      currentTheme = std::make_unique<EMinimalTheme>();
       currentMetrics = &RoundedRaffMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::LYRA_3_COVERS:
@@ -115,6 +137,7 @@ void scaleMetrics(ThemeMetrics& m, const float s) {
   sc(m.homeCoverHeight);
   sc(m.homeCoverTileHeight);
   sc(m.homeMenuTopOffset);
+  sc(m.coverGridTabBarHeight);
   sc(m.buttonHintsHeight);
   sc(m.sideButtonHintsWidth);
   sc(m.progressBarHeight);
@@ -151,9 +174,7 @@ const ThemeMetrics& UITheme::getMetrics() const {
   if (!metricsValid || touch != metricsForTouch) {
     adjustedMetrics = *currentMetrics;
 #if FREEINK_DEVICE_EMINIMAL
-    // Tied to the 1.5x font tier main.cpp registers for this device; the touch
-    // boards carry a uiScale too but keep the stock fonts, so they stay as is.
-    scaleMetrics(adjustedMetrics, BoardConfig::ACTIVE.uiScale);
+    scaleMetrics(adjustedMetrics, chromeScale());
     // RoundedRaff shares the battery line with the header title; with the 18 px
     // glyph the 24 px strip sat it visibly low. Judged on glass 2026-09-19 via
     // CMD:METRIC: 0 (glyph centred on the band's top edge) is right. Lyra's
@@ -204,6 +225,7 @@ constexpr MetricField kMetricFields[] = {
     {"homeCoverHeight", &ThemeMetrics::homeCoverHeight},
     {"homeCoverTileHeight", &ThemeMetrics::homeCoverTileHeight},
     {"homeMenuTopOffset", &ThemeMetrics::homeMenuTopOffset},
+    {"coverGridTabBarHeight", &ThemeMetrics::coverGridTabBarHeight},
     {"buttonHintsHeight", &ThemeMetrics::buttonHintsHeight},
     {"sideButtonHintsWidth", &ThemeMetrics::sideButtonHintsWidth},
     {"progressBarHeight", &ThemeMetrics::progressBarHeight},

@@ -45,7 +45,11 @@ inline void buildSliderDialogScreen(UiAppHost::UiScreen& screen, freeink::ui::Gf
 
   // The readout is the dialog's hero: remap the title slot to the large sans
   // so it reads at a glance.
+#if FREEINK_DEVICE_EMINIMAL
+  uiTarget.setFont(fui::GfxRendererTarget::FONT_TITLE, NOTOSERIF_24_FONT_ID);  // no built-in sans here
+#else
   uiTarget.setFont(fui::GfxRendererTarget::FONT_TITLE, NOTOSANS_18_FONT_ID);
+#endif
 
   const bool touch = mappedInput.hasTouch();
   // Touch boards get the finger-sized pill (same as the frontlight rows); on

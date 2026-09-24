@@ -25,6 +25,21 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+namespace {
+// e-Minimal has no front Left/Right (Up/Down/Select/Back only), so the cover
+// grid's split navigation -- side buttons for covers, front Left/Right for the
+// tabs -- would leave the tab row, Settings included, out of reach. There the
+// cover grid home takes the flat Up/Down walk the list home uses: current
+// book, grid row by row, then the tabs, wrapping at both ends. Holding Down
+// jumps to the tabs and holding Up back to the current book.
+#if FREEINK_DEVICE_EMINIMAL
+constexpr bool kCoverGridFlatNav = true;
+#else
+constexpr bool kCoverGridFlatNav = false;
+#endif
+constexpr unsigned long COVER_GRID_JUMP_MS = 700;
+}  // namespace
+
 int HomeActivity::getMenuItemCount() const {
   int count = 4;  // File Browser, Library, File transfer, Settings
   if (!recentBooks.empty()) {
@@ -328,8 +343,31 @@ void HomeActivity::loop() {
   };
 
   // Cover grid home splits navigation by button group (see below); the flat
-  // next/previous cycle is for the classic list home only.
-  if (!coverGridUi) {
+  // next/previous cycle is for the classic list home, and for the cover grid
+  // on boards without front Left/Right (kCoverGridFlatNav).
+  if (coverGridUi && kCoverGridFlatNav) {
+    // Steps land on release, so a hold jumps between the bands without a step
+    // first; wasLongPressed() swallows the release that follows it.
+    const int bookCount = static_cast<int>(recentBooks.size());
+    if (mappedInput.wasLongPressed(MappedInputManager::Button::Down, COVER_GRID_JUMP_MS)) {
+      selectorIndex = bookCount;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasLongPressed(MappedInputManager::Button::Up, COVER_GRID_JUMP_MS)) {
+      selectorIndex = 0;
+      requestUpdate();
+      return;
+    }
+    buttonNavigator.onRelease({MappedInputManager::Button::Down}, [this, menuCount] {
+      selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
+      requestUpdate();
+    });
+    buttonNavigator.onRelease({MappedInputManager::Button::Up}, [this, menuCount] {
+      selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
+      requestUpdate();
+    });
+  } else if (!coverGridUi) {
     buttonNavigator.onNext([this, menuCount] {
       selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
       requestUpdate();
@@ -372,6 +410,7 @@ void HomeActivity::loop() {
       activateSelection();
       return;
     }
+    if (kCoverGridFlatNav) return;
     // Side page buttons walk the covers, front Left/Right walk the tabs
     // (selectorIndex is flat: books first, then the tab items). A press while
     // selection sits in the other band jumps into this band first.
@@ -459,9 +498,10 @@ void HomeActivity::render(RenderLock&&) {
     coverGridUi->setSelection(selectorIndex);
     UITheme::getInstance().drawCoverGridHome(*coverGridUi);
     // Front Left/Right walk the tabs, so their hints read Left/Right; the
-    // side page buttons (unhinted) walk the covers.
+    // side page buttons (unhinted) walk the covers. The flat walk is Up/Down.
     const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
-                                              tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+                                              kCoverGridFlatNav ? tr(STR_DIR_UP) : tr(STR_DIR_LEFT),
+                                              kCoverGridFlatNav ? tr(STR_DIR_DOWN) : tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
                                                                    : HalDisplay::FAST_REFRESH);

@@ -1,5 +1,26 @@
 #pragma once
 
+#if FREEINK_DEVICE_EMINIMAL
+// Reader fonts for the ~226 DPI 7.8" panel: one family (NotoSerif, sans read
+// no different on it) at 18-24 pt, where the stock 12-18 pt set is sized for
+// ~150 DPI panels. Other families and sizes come from the SD card.
+#include <builtinFonts/notoserif_18_bold.h>
+#include <builtinFonts/notoserif_18_bolditalic.h>
+#include <builtinFonts/notoserif_18_italic.h>
+#include <builtinFonts/notoserif_18_regular.h>
+#include <builtinFonts/notoserif_20_bold.h>
+#include <builtinFonts/notoserif_20_bolditalic.h>
+#include <builtinFonts/notoserif_20_italic.h>
+#include <builtinFonts/notoserif_20_regular.h>
+#include <builtinFonts/notoserif_22_bold.h>
+#include <builtinFonts/notoserif_22_bolditalic.h>
+#include <builtinFonts/notoserif_22_italic.h>
+#include <builtinFonts/notoserif_22_regular.h>
+#include <builtinFonts/notoserif_24_bold.h>
+#include <builtinFonts/notoserif_24_bolditalic.h>
+#include <builtinFonts/notoserif_24_italic.h>
+#include <builtinFonts/notoserif_24_regular.h>
+#else
 #include <builtinFonts/notoserif_12_bold.h>
 #include <builtinFonts/notoserif_12_bolditalic.h>
 #include <builtinFonts/notoserif_12_italic.h>
@@ -32,6 +53,7 @@
 #include <builtinFonts/notosans_18_bolditalic.h>
 #include <builtinFonts/notosans_18_italic.h>
 #include <builtinFonts/notosans_18_regular.h>
+#endif
 // UI chrome fonts: one tier per device class. main.cpp registers whichever
 // tier is compiled here under the same font slots (small / UI_10 / UI_12).
 #if FREEINK_DEVICE_EMINIMAL

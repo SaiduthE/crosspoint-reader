@@ -60,6 +60,8 @@ class CoverGridHomeUi final : public UiAppHost {
   freeink::ui::BookCardProps card;
   freeink::ui::CoverGridProps grid;
   freeink::ui::Rect gridBounds{};
+  // Where bookCard painted the featured cover this frame (anchors its cursor bar).
+  freeink::ui::Rect featuredCoverRect{};
   freeink::ui::TabBarProps tabs;
   std::array<freeink::ui::TabItem, 5> tabItems;
 };
