@@ -219,6 +219,33 @@ void renderRowsFromPxcSlot(GfxRenderer& renderer, int x, int y) {
   DirectPixelWriter pw;
   pw.init(renderer);
 
+  // 16-level target in a portrait orientation: a logical image row is a
+  // physical COLUMN, so the row walk below would stride one 4bpp row (936 B on
+  // the 7.8") per pixel -- a fresh PSRAM cache line and a read-modify-write
+  // for every one of ~2.1 M pixels, the pattern that made each plane pass of a
+  // full-page image cost ~1 s. Walk bands of kBand image rows column by column
+  // instead: the kBand pixels of one column land side by side in one physical
+  // row (kBand / 2 bytes, one cache line), and the band's kBand source rows
+  // (a few hundred bytes each) stay cached across the columns. Same pixels,
+  // same values; only the visiting order changes. Contiguous PSRAM payload
+  // only (the chunked slot can split a row across chunks).
+  if (pw.fb4 && pw.phyXStepY != 0 && pxcBlock) {
+    constexpr int kBand = 32;
+    for (int row0 = 0; row0 < pxcSlotHeight; row0 += kBand) {
+      const int row1 = (pxcSlotHeight - row0 < kBand) ? pxcSlotHeight : row0 + kBand;
+      const uint8_t* bandBase = pxcBlock + static_cast<size_t>(row0) * bytesPerRow;
+      for (int col = 0; col < pxcSlotWidth; col++) {
+        const int byteIdx = col >> 2;
+        const int bitShift = 6 - (col & 3) * 2;
+        const uint8_t* src = bandBase + byteIdx;
+        for (int row = row0; row < row1; row++, src += bytesPerRow) {
+          pw.writePixelAt(x + col, y + row, (*src >> bitShift) & 0x03);
+        }
+      }
+    }
+    return;
+  }
+
   for (int row = 0; row < pxcSlotHeight; row++) {
     const uint8_t* rowBuffer = pxcRowPtr((size_t)row * bytesPerRow, bytesPerRow, tempRow);
     pw.beginRow(y + row);

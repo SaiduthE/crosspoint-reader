@@ -1589,6 +1589,59 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     renderer.clearScreen();
   }
 
+  // IT8951 (e-Minimal): render the grey page ONCE, straight into a 16-level
+  // frame, and load it whole -- instead of B/W + LSB + MSB passes that the
+  // driver then combines into the same 4bpp frame. The nibbles written are
+  // exactly what that combine produced (AA glyph 0xA/0x5/0x0, image level x5,
+  // status bar solid), so the page looks the same; the saving is the two
+  // extra walks of the page (an image page decoded/drawn three times) and the
+  // driver's combine. Same refresh cadence as the combined-base path below:
+  // HALF on the cleanup page, else FAST (the driver resolves GC16 vs DU4), and
+  // an image page makes the next page a clean refresh. Falls through to the
+  // plane path when the 4bpp frame cannot be allocated; other panels never
+  // take it (supportsGray4() is IT8951-only and false in dark mode).
+  if (needsAnyGrayscale && !absoluteImageGrayscale && renderer.supportsGray4() &&
+      renderer.beginGray4Target(needsTextGrayscale)) {
+    const auto tStart = millis();
+    // Text AA follows the setting; images always land grey (as the plane
+    // passes drew them even with AA off).
+    page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
+    // The status bar never went through the gray planes: solid ink, as the
+    // B/W pass drew it.
+    renderer.setGray4TextAntiAliasing(false);
+    renderStatusBar();
+    renderer.endGray4Target();
+    const auto tRender = millis();
+
+    // The 1bpp framebuffer must still hold the page: overlays (toolbar menu,
+    // popups) draw on it and B/W-refresh against the driver's base, which the
+    // driver re-derives from this same frame by the same rule (white iff 0xF).
+    renderer.gray4ToFrameBuffer();
+    const auto tBase = millis();
+
+    const auto mode = (pagesUntilFullRefresh <= 1) ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+    if (pagesUntilFullRefresh <= 1) {
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    } else {
+      pagesUntilFullRefresh--;
+    }
+    // A dithered picture driven differentially leaves the heaviest residue;
+    // make the next page a clean refresh (see the combined-base path).
+    if (pageHasImages) pagesUntilFullRefresh = 1;
+    const bool shown = renderer.displayGray4Buffer(renderer.getGray4Buffer(), mode);
+    renderer.releaseGray4Target();
+    if (!shown) {
+      LOG_ERR("ERS", "gray4 display refused; showing the page B/W");
+      renderer.displayBuffer(mode);
+    }
+    const auto tEnd = millis();
+    LOG_DBG("ERS",
+            "Page render (gray4): prewarm=%lums placeholder=%lums render=%lums base=%lums gray4_display=%lums "
+            "total=%lums",
+            tPrewarm - t0, tStart - tPrewarm, tRender - tStart, tBase - tRender, tEnd - tBase, tEnd - t0);
+    return;
+  }
+
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
   const auto tBwRender = millis();

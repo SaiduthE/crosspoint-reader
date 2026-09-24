@@ -156,6 +156,14 @@ bool HalDisplay::supportsStripGrayscale() const { return grayscaleCapabilities()
 
 bool HalDisplay::combinesGrayscaleBase() const { return grayscaleCapabilities().base == GrayscaleBase::Combined; }
 
+bool HalDisplay::supportsGray4() const { return einkDisplay.supportsGray4(); }
+
+uint32_t HalDisplay::getGray4BufferSize() const { return einkDisplay.gray4BufferSize(); }
+
+bool HalDisplay::displayGray4(const uint8_t* fb4, RefreshMode mode, bool turnOffScreen) {
+  return einkDisplay.displayGray4(fb4, convertRefreshMode(mode), turnOffScreen);
+}
+
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 
 uint16_t HalDisplay::getDisplayHeight() const { return einkDisplay.getDisplayHeight(); }

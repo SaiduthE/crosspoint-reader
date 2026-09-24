@@ -115,6 +115,75 @@ TEST(GlyphBitmap, MatchesPerPixelReferenceAcrossOrientationsRotationsPlanesAndCl
   }
 }
 
+namespace {
+// 4bpp reference: two pixels per byte, even x in the high nibble. The nibble a
+// source value paints is what the driver composes from base + LSB + MSB.
+constexpr int STRIDE4 = PANEL_WIDTH / 2;
+
+void compareGray4(int orientation, int rotation, bool twoBit, bool antiAliased, bool state, int width, int height,
+                  int x, int y, Rect clip) {
+  SCOPED_TRACE(::testing::Message() << "gray4 " << orientation << ',' << rotation << ',' << twoBit << ','
+                                    << antiAliased << ',' << state << " size=" << width << 'x' << height
+                                    << " at=" << x << ',' << y);
+  const auto [dxX, dxY, dyX, dyY] = AXES[rotation];
+  const glyphBitmap::Frame logical{x, y, dxX, dxY, dyX, dyY};
+  std::vector<uint8_t> bitmap((width * height * (twoBit ? 2 : 1) + 7) / 8);
+  for (size_t i = 0; i < bitmap.size(); ++i) bitmap[i] = static_cast<uint8_t>(i * 73 + 0x1b);
+  std::vector<uint8_t> expected(PANEL_HEIGHT * STRIDE4 + 32);
+  for (size_t i = 0; i < expected.size(); ++i) expected[i] = static_cast<uint8_t>(i * 53 + 0xa5);
+  auto actual = expected;
+  for (int gy = 0; gy < height; ++gy) {
+    for (int gx = 0; gx < width; ++gx) {
+      const int lx = x + gx * dxX + gy * dyX;
+      const int ly = y + gx * dxY + gy * dyY;
+      if (lx < clip.left || ly < clip.top || lx >= clip.right || ly >= clip.bottom) continue;
+      const auto [px, py] = physical(orientation, lx, ly);
+      if (px < 0 || px >= PANEL_WIDTH || py < 0 || py >= PANEL_HEIGHT) continue;
+      const int source = gy * width + gx;
+      int nibble = -1;
+      if (twoBit) {
+        const int raw = (bitmap[source / 4] >> ((3 - source % 4) * 2)) & 3;  // 0 white .. 3 black
+        if (raw != 0) nibble = !state ? 0xF : !antiAliased ? 0x0 : raw == 1 ? 0xA : raw == 2 ? 0x5 : 0x0;
+      } else if ((bitmap[source / 8] >> (7 - source % 8)) & 1) {
+        nibble = state ? 0x0 : 0xF;
+      }
+      if (nibble < 0) continue;
+      auto& byte = expected[16 + py * STRIDE4 + px / 2];
+      byte = (px % 2) ? static_cast<uint8_t>((byte & 0xF0) | nibble) : static_cast<uint8_t>((byte & 0x0F) | (nibble << 4));
+    }
+  }
+
+  glyphBitmap::Clip local{0, 0, width, height};
+  glyphBitmap::clipToRect(logical, clip.left, clip.top, clip.right, clip.bottom, local);
+  const auto [px, py] = physical(orientation, x, y);
+  const auto [xx, xy] = physical(orientation, x + dxX, y + dxY);
+  const auto [yx, yy] = physical(orientation, x + dyX, y + dyY);
+  const glyphBitmap::Gray4Target target{
+      actual.data() + 16, PANEL_WIDTH, PANEL_HEIGHT, STRIDE4, {px, py, xx - px, xy - py, yx - px, yy - py}};
+  glyphBitmap::drawGray4(bitmap.data(), width, height, twoBit, antiAliased, state, target, local);
+  EXPECT_EQ(expected, actual);
+}
+}  // namespace
+
+TEST(GlyphBitmap, Gray4MatchesPerPixelReferenceAcrossOrientationsRotationsAndClipping) {
+  for (int orientation = 0; orientation < 4; ++orientation) {
+    for (int rotation = 0; rotation < 2; ++rotation) {
+      for (bool twoBit : {false, true}) {
+        for (bool antiAliased : {false, true}) {
+          for (bool state : {false, true}) {
+            for (int width : {1, 3, 7, 16, 31}) {
+              for (const auto [x, y] : {std::pair{-5, -3}, std::pair{0, 0}, std::pair{9, 11}, std::pair{29, 31}}) {
+                compareGray4(orientation, rotation, twoBit, antiAliased, state, width, 13, x, y, {-20, -20, 60, 60});
+                compareGray4(orientation, rotation, twoBit, antiAliased, state, width, 13, x, y, {2, 3, 18, 20});
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(GlyphBitmap, EmptyAndFullyClippedGlyphsDoNotWrite) {
   for (int orientation = 0; orientation < 4; ++orientation) {
     for (int rotation = 0; rotation < 2; ++rotation) {

@@ -17,6 +17,60 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+namespace {
+// Four XTH pixels (a plane-1 nibble and a plane-2 nibble, index a << 4 | b,
+// MSB = first pixel) -> two 4bpp bytes, first pixel in the high nibble, as a
+// little-endian uint16 (byte 0 = pixels 0-1). Value (bit1 << 1) | bit2 is
+// 0 white, 1 dark, 2 light, 3 black -> nibble 0xF, 0x5, 0xA, 0x0, the four
+// levels the driver's gray4() gives the base/LSB/MSB planes. Not monotonic in
+// v (dark is 1, light 2), so a table, not 15 - 5 * v -- that swapped the two
+// greys and left manga shading dull and noisy.
+struct XthGray4Table {
+  uint16_t v[256];
+  constexpr XthGray4Table() : v() {
+    constexpr unsigned kNibble[4] = {0xF, 0x5, 0xA, 0x0};
+    for (unsigned i = 0; i < 256; i++) {
+      const unsigned a = i >> 4, b = i & 0x0F;
+      unsigned nib[4] = {0, 0, 0, 0};
+      for (unsigned k = 0; k < 4; k++) {
+        const unsigned pv = (((a >> (3 - k)) & 1u) << 1) | ((b >> (3 - k)) & 1u);
+        nib[k] = kNibble[pv];
+      }
+      const unsigned byte0 = (nib[0] << 4) | nib[1];
+      const unsigned byte1 = (nib[2] << 4) | nib[3];
+      v[i] = static_cast<uint16_t>(byte0 | (byte1 << 8));
+    }
+  }
+};
+constexpr XthGray4Table kXthGray4;
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "XthGray4Table packs output bytes little-endian");
+// First pixel alone, the rest white: plane 2 only = dark, plane 1 only = light
+// (the plane path's LSB = ~a & b, MSB = a ^ b), both = black.
+static_assert(kXthGray4.v[0x08] == 0xFF5F, "XTH value 1 must be dark grey (0x5)");
+static_assert(kXthGray4.v[0x80] == 0xFFAF, "XTH value 2 must be light grey (0xA)");
+static_assert(kXthGray4.v[0x88] == 0xFF0F, "XTH value 3 must be black");
+static_assert(kXthGray4.v[0x00] == 0xFFFF, "XTH value 0 must be white");
+}  // namespace
+
+uint8_t* XtcReaderActivity::ensureGray4Frame(const size_t bytes) {
+  if (gray4Frame && gray4FrameSize == bytes) return gray4Frame.get();
+  gray4Frame.reset();
+  gray4FrameSize = 0;
+  gray4Frame = HalMemory::allocatePsram(bytes);
+  if (!gray4Frame) {
+    LOG_ERR("XTR", "No PSRAM for the 4bpp frame (%lu bytes); using the plane path", static_cast<unsigned long>(bytes));
+    return nullptr;
+  }
+  gray4FrameSize = bytes;
+  return gray4Frame.get();
+}
+
+void XtcReaderActivity::onExit() {
+  ReaderActivity::onExit();
+  gray4Frame.reset();
+  gray4FrameSize = 0;
+}
+
 bool XtcReaderActivity::loadBook() {
   auto loadedXtc = makeUniqueNoThrow<Xtc>(bookPath, "/.crosspoint");
   if (!loadedXtc) {
@@ -266,6 +320,54 @@ void XtcReaderActivity::renderPage() {
         }
       }
     };
+
+    // 16-level panels (IT8951): expand the page straight into one 4bpp frame
+    // and send it as the page's single grey refresh, instead of staging the
+    // base, copying the LSB/MSB planes and having the driver fold all three
+    // back into 4bpp. Plane byte i is frame-buffer byte i (8 physical pixels,
+    // MSB first), so its 8 pixels are 4bpp bytes 4i..4i+3 (row stride
+    // widthBytes * 4, left pixel in the high nibble). The same pass leaves
+    // the B/W base in the frame buffer -- what the plane path leaves there for
+    // whatever draws over the page next -- and weighs the ink for the dark test.
+    uint8_t* const fb4 = direct && renderer.supportsGray4() && planeSize == renderer.getBufferSize()
+                             ? ensureGray4Frame(planeSize * 4)
+                             : nullptr;
+    if (fb4) {
+      uint32_t* out = reinterpret_cast<uint32_t*>(fb4);
+      uint64_t ink = 0;
+      for (size_t i = 0; i < planeSize; i++) {
+        const uint8_t a = plane1[i], b = plane2[i];
+        fb[i] = static_cast<uint8_t>(~(a | b));
+        // black 3, dark 2, light 1 == popcount(a) + 2 * popcount(b)
+        ink += __builtin_popcount(a) + 2 * __builtin_popcount(b);
+        out[i] = static_cast<uint32_t>(kXthGray4.v[(a & 0xF0) | (b >> 4)]) |
+                 (static_cast<uint32_t>(kXthGray4.v[((a & 0x0F) << 4) | (b & 0x0F)]) << 16);
+      }
+      prevPageDark = ink > static_cast<uint64_t>(planeSize) * 8 * 3 * DARK_PAGE_PERCENT / 100;
+      const unsigned long tBuilt = millis();
+
+      // HALF, as the staged base asked of displayGrayBuffer(): GC16 every page.
+      if (renderer.displayGray4Buffer(fb4, HalDisplay::HALF_REFRESH)) {
+        pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+        if (repeat) renderer.repeatLastRefresh();
+        const unsigned long tGray = millis();
+
+        // The frame buffer already holds the base; nothing is staged, so this
+        // only settles the display's bookkeeping, as on the plane path.
+        renderer.cleanupGrayscaleWithFrameBuffer();
+
+        free(pageBuffer);
+
+        LOG_INF("XTR", "Page %lu/%lu (2-bit, gray4%s%s): load %lu ms, build %lu, gray4 %lu, cleanup %lu",
+                currentPage + 1, xtc->getPageCount(),
+                flashed  ? ", white flash first"
+                : repeat ? ", repeated"
+                         : "",
+                prevPageDark ? ", dark" : "", t0 - tLoad, tBuilt - t0, tGray - tBuilt, millis() - tGray);
+        return;
+      }
+      LOG_ERR("XTR", "displayGray4Buffer refused the frame; using the plane path");
+    }
 
     fillPass(Pass::Base);
     const unsigned long tBase = millis();

@@ -96,6 +96,20 @@ class GfxRenderer {
   mutable int clipRight_ = 32767;
   mutable int clipBottom_ = 32767;
 
+  // 16-level (4bpp) render target, IT8951 only. While active, every primitive
+  // the reader page uses (drawPixel, fills, glyph blits, DirectPixelWriter
+  // images, drawBitmap) writes nibbles into gray4Buf_ instead of the 1bpp
+  // framebuffer, so an AA/image page renders ONCE instead of B/W + LSB + MSB.
+  // renderMode stays BW throughout: every caller keeps its B/W semantics and
+  // only the final pixel write changes. See beginGray4Target().
+  uint8_t* gray4Buf_ = nullptr;  // PSRAM, getGray4BufferSize() bytes
+  bool gray4Active_ = false;
+  bool gray4TextAa_ = false;  // 2bpp glyphs paint their AA grey (else solid)
+  // Write one physical pixel's nibble (0x0 black .. 0xF white). No bounds check.
+  void putGray4Pixel(int phyX, int phyY, uint8_t value) const;
+  // Logical-coordinate form: clip rect, rotation and panel bounds applied.
+  void drawGray4Pixel(int x, int y, uint8_t value) const;
+
   // CJK UI font fallback map: primary (built-in, Latin-only) UI font id -> a
   // size-matched SD-card font id that carries CJK glyphs. When a string drawn
   // or measured with a mapped primary font contains a CJK codepoint the primary
@@ -138,7 +152,10 @@ class GfxRenderer {
  public:
   explicit GfxRenderer(HalDisplay& halDisplay)
       : display(halDisplay), renderMode(BW), orientation(Portrait), fadingFix(false) {}
-  ~GfxRenderer() { freeBwBufferChunks(); }
+  ~GfxRenderer() {
+    freeBwBufferChunks();
+    releaseGray4Target();
+  }
 
   // Setup
   void begin();  // must be called right after display.begin()
@@ -379,6 +396,50 @@ class GfxRenderer {
   void copyGrayscaleLsbBuffers() const;
   void copyGrayscaleMsbBuffers() const;
   void displayGrayBuffer() const;
+  // Raw 16-level frame (IT8951 only): load `fb4` whole and refresh it as a
+  // grayscale page. Layout and gating: HalDisplay::displayGray4 (physical
+  // orientation, getDisplayWidthBytes()*4-byte rows, left pixel in the high
+  // nibble). Returns false, having done nothing, where unsupported.
+  bool supportsGray4() const;
+  bool displayGray4Buffer(const uint8_t* fb4, HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+
+  // 16-level render target (only where supportsGray4()). Render a grey page
+  // once, straight to 4bpp:
+  //   if (renderer.beginGray4Target(aa)) {   // false: use the plane path
+  //     ...draw the page (B/W semantics; renderMode stays BW)...
+  //     renderer.endGray4Target();
+  //     renderer.gray4ToFrameBuffer();        // 1bpp base for later B/W draws
+  //     renderer.displayGray4Buffer(renderer.getGray4Buffer(), mode);
+  //     renderer.releaseGray4Target();
+  //   }
+  // begin allocates the PSRAM frame (getGray4BufferSize(), ~1.3 MB on the
+  // 7.8") if it is not held, and clears it to white (0xF). textAntiAliasing
+  // selects how 2bpp glyphs land: their AA grey (0xA light, 0x5 dark, 0x0
+  // black -- the same nibbles the driver composes from base + LSB + MSB) or
+  // solid ink like the B/W pass; switch it mid-page with
+  // setGray4TextAntiAliasing (the status bar is drawn solid, as today).
+  // Images (DirectPixelWriter, drawBitmap) always land at their 2bpp grey
+  // level x5 (0x0/0x5/0xA/0xF). Not honoured (not used by page rendering):
+  // drawImage (raw display blit), invertScreen, writeFramebufferRegion,
+  // copyBufferToRegion, preserveImagePolarity (dark mode has no gray4).
+  bool beginGray4Target(bool textAntiAliasing);
+  void setGray4TextAntiAliasing(const bool on) { gray4TextAa_ = on; }
+  bool gray4TextAntiAliasing() const { return gray4TextAa_; }
+  void endGray4Target() { gray4Active_ = false; }
+  // Frees the PSRAM frame (no-op if not held). Ends an active target.
+  void releaseGray4Target();
+  // The active target (nullptr when no target is active): raw writers use it.
+  uint8_t* getGray4Target() const { return gray4Active_ ? gray4Buf_ : nullptr; }
+  // The held frame, active or not (for displayGray4Buffer after endGray4Target).
+  const uint8_t* getGray4Buffer() const { return gray4Buf_; }
+  // Bytes per 4bpp row: getDisplayWidthBytes() * 4.
+  uint32_t getGray4Stride() const { return static_cast<uint32_t>(panelWidthBytes) * 4; }
+  size_t getGray4BufferSize() const;
+  // Rebuild the 1bpp framebuffer from the held 4bpp frame: white iff the
+  // nibble is 0xF, else black -- the B/W base the plane path would have
+  // rendered, and exactly what the IT8951 driver re-derives as its own base,
+  // so later B/W overlays diff cleanly.
+  void gray4ToFrameBuffer() const;
   // Active input encoding, used when drawing monochrome overlays into planes.
   bool grayPlanesAreAbsolute() const { return absoluteGrayPlanes; }
 

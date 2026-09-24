@@ -10,6 +10,7 @@
 #include <SdCardFont.h>
 #include <TtfEpdFont.h>
 #include <Utf8.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 
@@ -599,6 +600,15 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
   physical.dyX = nextX - physical.x;
   physical.dyY = nextY - physical.y;
 
+  if (gray4Active_) {
+    // One pass paints the glyph's final nibbles (AA grey or solid ink; see
+    // glyphBitmap::gray4Levels) -- what base + LSB + MSB would compose.
+    const glyphBitmap::Gray4Target target4{gray4Buf_, panelWidth, panelHeight, static_cast<int>(getGray4Stride()),
+                                           physical};
+    glyphBitmap::drawGray4(bitmap, width, height, twoBit, gray4TextAa_, state, target4, clip);
+    return;
+  }
+
   const glyphBitmap::Plane plane = mode == BW              ? glyphBitmap::Plane::BW
                                    : mode == GRAYSCALE_MSB ? glyphBitmap::Plane::GrayMSB
                                                            : glyphBitmap::Plane::GrayLSB;
@@ -618,6 +628,12 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   // Bounds checking against runtime panel dimensions
   if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) {
     LOG_ERR("GFX", "!! Outside range (%d, %d) -> (%d, %d)", x, y, phyX, phyY);
+    return;
+  }
+
+  // 16-level target (IT8951 grey pages): B/W semantics, written as a nibble.
+  if (gray4Active_) {
+    putGray4Pixel(phyX, phyY, state ? 0x0 : 0xF);
     return;
   }
 
@@ -1061,6 +1077,38 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
   int phyY0 = std::min(paY, pbY);
   int phyY1 = std::max(paY, pbY);
 
+  // 16-level target: solid fills as nibble runs; the two dither patterns keep
+  // their exact B/W pixels (what the plane path's base shows) via drawPixel.
+  if (gray4Active_) {
+    if constexpr (C == Color::Black || C == Color::White) {
+      const uint8_t v = (C == Color::Black) ? 0x0 : 0xF;
+      const uint8_t vv = static_cast<uint8_t>(v * 0x11);
+      const uint32_t stride4 = getGray4Stride();
+      const int end = phyX1 + 1;     // exclusive
+      const int fullEnd = end & ~1;  // last even boundary
+      for (int py = phyY0; py <= phyY1; ++py) {
+        uint8_t* row = gray4Buf_ + static_cast<uint32_t>(py) * stride4;
+        int px = phyX0;
+        if (px & 1) {  // odd head pixel: low nibble
+          row[px >> 1] = static_cast<uint8_t>((row[px >> 1] & 0xF0) | v);
+          ++px;
+        }
+        if (fullEnd > px) {
+          memset(row + (px >> 1), vv, static_cast<size_t>(fullEnd - px) >> 1);
+          px = fullEnd;
+        }
+        if (px < end) {  // even tail pixel: high nibble
+          row[px >> 1] = static_cast<uint8_t>((row[px >> 1] & 0x0F) | (v << 4));
+        }
+      }
+    } else {
+      for (int ly = ly0; ly < ly1; ++ly) {
+        for (int lx = lx0; lx < lx1; ++lx) drawPixelDither<C>(lx, ly);
+      }
+    }
+    return;
+  }
+
   // Strip mode: clip Y range to the active band and redirect writes.
   uint8_t* target = getWriteTarget();
   const int originY = getWriteOriginY();
@@ -1488,7 +1536,11 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
       if (whiteAsTransparent && val == 3) continue;
 
-      if (renderMode == BW && val < 3) {
+      if (gray4Active_) {
+        // 2bpp level 0 black .. 3 white -> nibble level * 5; white stays
+        // background, as in the B/W pass.
+        if (val < 3) drawGray4Pixel(screenX, screenY, static_cast<uint8_t>(val * 5));
+      } else if (renderMode == BW && val < 3) {
         drawPixel(screenX, screenY);
       } else if (renderMode == GRAYSCALE_LSB || renderMode == GRAYSCALE_MSB) {
         const auto pixel = grayPlanePixel(val, renderMode == GRAYSCALE_MSB, absoluteGrayPlanes);
@@ -1680,6 +1732,12 @@ static unsigned long start_ms = 0;
 
 void GfxRenderer::clearScreen(const uint8_t color) const {
   start_ms = millis();
+  if (gray4Active_) {
+    // 1bpp fill patterns other than all-black/all-white are not expected here;
+    // anything but 0x00 clears to white.
+    memset(gray4Buf_, color == 0x00 ? 0x00 : 0xFF, getGray4BufferSize());
+    return;
+  }
   if (_stripActive) {
     // Clear only the active band's scratch, not the shared framebuffer.
     memset(_stripBuf, color, static_cast<size_t>(panelWidthBytes) * _stripRows);
@@ -2310,6 +2368,92 @@ void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuff
 void GfxRenderer::displayGrayBuffer() const {
   display.displayGrayBuffer(fadingFix);
   absoluteGrayPlanes = false;
+}
+
+bool GfxRenderer::supportsGray4() const { return display.supportsGray4(); }
+
+bool GfxRenderer::displayGray4Buffer(const uint8_t* fb4, HalDisplay::RefreshMode refreshMode) const {
+  if (!display.supportsGray4()) return false;  // leave a promoted refresh for the fallback path
+  return display.displayGray4(fb4, applyPromotedRefresh(refreshMode), fadingFix);
+}
+
+size_t GfxRenderer::getGray4BufferSize() const { return display.getGray4BufferSize(); }
+
+void GfxRenderer::putGray4Pixel(const int phyX, const int phyY, const uint8_t value) const {
+  uint8_t& byte = gray4Buf_[static_cast<uint32_t>(phyY) * getGray4Stride() + (static_cast<uint32_t>(phyX) >> 1)];
+  byte = (phyX & 1) ? static_cast<uint8_t>((byte & 0xF0) | value) : static_cast<uint8_t>((byte & 0x0F) | (value << 4));
+}
+
+void GfxRenderer::drawGray4Pixel(const int x, const int y, const uint8_t value) const {
+  if (x < clipLeft_ || y < clipTop_ || x >= clipRight_ || y >= clipBottom_) return;
+  int phyX = 0;
+  int phyY = 0;
+  rotateCoordinates(orientation, x, y, &phyX, &phyY, panelWidth, panelHeight);
+  if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) return;
+  putGray4Pixel(phyX, phyY, value);
+}
+
+bool GfxRenderer::beginGray4Target(const bool textAntiAliasing) {
+  if (!display.supportsGray4() || _stripActive || !frameBuffer) return false;
+  const size_t bytes = getGray4BufferSize();
+  // The layout the writers assume (getGray4Stride() rows); refuse anything else.
+  if (bytes == 0 || bytes < static_cast<size_t>(getGray4Stride()) * panelHeight) return false;
+  if (!gray4Buf_) {
+    // PSRAM only: ~1.3 MB never fits the internal heap, and a failed
+    // allocation just means this page takes the plane path.
+    gray4Buf_ = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!gray4Buf_) {
+      LOG_ERR("GFX", "gray4 target: no %u B PSRAM block (largest %u); using plane path", static_cast<unsigned>(bytes),
+              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+      return false;
+    }
+  }
+  memset(gray4Buf_, 0xFF, bytes);  // white
+  gray4TextAa_ = textAntiAliasing;
+  gray4Active_ = true;
+  return true;
+}
+
+void GfxRenderer::releaseGray4Target() {
+  gray4Active_ = false;
+  if (gray4Buf_) {
+    heap_caps_free(gray4Buf_);
+    gray4Buf_ = nullptr;
+  }
+}
+
+namespace {
+// One 4bpp byte (two pixels, first in the high nibble) -> two 1bpp bits, first
+// pixel in bit 1; a bit is set (white) only for nibble 0xF. Same rule as the
+// IT8951 driver's own base derivation (kGray4Planes).
+struct Gray4ToBwTable {
+  uint8_t v[256];
+  constexpr Gray4ToBwTable() : v() {
+    for (unsigned i = 0; i < 256; i++) {
+      v[i] = static_cast<uint8_t>((((i >> 4) == 0x0F) ? 2u : 0u) | (((i & 0x0F) == 0x0F) ? 1u : 0u));
+    }
+  }
+};
+constexpr Gray4ToBwTable kGray4ToBw;
+}  // namespace
+
+void GfxRenderer::gray4ToFrameBuffer() const {
+  if (!gray4Buf_ || !frameBuffer) return;
+  const uint32_t stride4 = getGray4Stride();
+  for (uint32_t y = 0; y < panelHeight; ++y) {
+    const uint8_t* src = gray4Buf_ + y * stride4;
+    uint8_t* dst = frameBuffer + y * panelWidthBytes;
+    for (uint32_t xb = 0; xb < panelWidthBytes; ++xb, src += 4) {
+      uint32_t word;
+      memcpy(&word, src, sizeof(word));
+      if (word == 0xFFFFFFFFu) {  // the common case: 8 white pixels
+        dst[xb] = 0xFF;
+        continue;
+      }
+      dst[xb] = static_cast<uint8_t>((kGray4ToBw.v[src[0]] << 6) | (kGray4ToBw.v[src[1]] << 4) |
+                                     (kGray4ToBw.v[src[2]] << 2) | kGray4ToBw.v[src[3]]);
+    }
+  }
 }
 
 void GfxRenderer::setRenderMode(RenderMode mode) {

@@ -152,4 +152,80 @@ inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Plan
   }
 }
 
+// --- 16-level (4bpp) target ---------------------------------------------------
+// A whole physical frame, two pixels per byte, the left (even x) pixel in the
+// high nibble, 0x0 black .. 0xF white (the IT8951 host format).
+struct Gray4Target {
+  uint8_t* buffer;  // Row 0 of the frame
+  int width;        // Physical panel width in pixels
+  int height;       // Physical panel height in pixels
+  int stride;       // Bytes per physical row (>= width / 2)
+  Frame frame;      // Physical placement of the glyph
+};
+
+// Value for "leave the pixel alone" in a nibble table.
+constexpr uint8_t kGray4Skip = 0xFF;
+
+// Nibble each source value paints, as the plane path would have composed it
+// (driver gray4(): base white -> 0xF, MSB only -> 0xA, MSB+LSB -> 0x5, none
+// -> 0x0). 2bpp source values: 0 white (untouched), 1 light, 2 dark, 3 black.
+//  - antiAliased && state (black text): 1 -> 0xA, 2 -> 0x5, 3 -> 0x0 -- what
+//    the B/W base + LSB + MSB passes produce for an AA glyph.
+//  - !antiAliased && state: every ink value -> 0x0, the B/W pass alone.
+//  - !state (white ink): every ink value -> 0xF; the planes only ever add grey
+//    where the base is black, so white ink stays white.
+// 1bpp source: value 1 is ink, painted 0x0 or 0xF by state.
+inline void gray4Levels(bool twoBit, bool antiAliased, bool state, uint8_t levels[4]) {
+  const uint8_t ink = state ? 0x0 : 0xF;
+  levels[0] = kGray4Skip;
+  if (!twoBit) {
+    levels[1] = ink;
+    levels[2] = levels[3] = kGray4Skip;  // unreachable for 1bpp
+    return;
+  }
+  levels[1] = (state && antiAliased) ? 0xA : ink;
+  levels[2] = (state && antiAliased) ? 0x5 : ink;
+  levels[3] = ink;
+}
+
+__attribute__((always_inline)) inline void paintNibble(uint8_t* buffer, int destination, uint8_t value) {
+  if (value == kGray4Skip) return;
+  uint8_t& byte = buffer[destination >> 1];
+  byte = (destination & 1) ? static_cast<uint8_t>((byte & 0xF0) | value)
+                           : static_cast<uint8_t>((byte & 0x0F) | (value << 4));
+}
+
+// Paint a packed glyph (same bitmap format as draw()) into a 4bpp frame.
+// Clipping and addressing are resolved once per glyph, as in draw(); the walk
+// is a flat nibble index (stride * 2 nibbles per physical row).
+inline void drawGray4(const uint8_t* bitmap, int width, int height, bool twoBit, bool antiAliased, bool state,
+                      const Gray4Target& target, Clip clip) {
+  uint8_t levels[4];
+  gray4Levels(twoBit, antiAliased, state, levels);
+
+  clip.left = std::max(clip.left, 0);
+  clip.top = std::max(clip.top, 0);
+  clip.right = std::min(clip.right, width);
+  clip.bottom = std::min(clip.bottom, height);
+  clipToRect(target.frame, 0, 0, target.width, target.height, clip);
+  if (clip.left >= clip.right || clip.top >= clip.bottom) return;
+
+  const Frame& frame = target.frame;
+  const int strideNibbles = target.stride * 2;
+  const int stepX = frame.dxY * strideNibbles + frame.dxX;
+  const int stepY = frame.dyY * strideNibbles + frame.dyX;
+  int rowNibble = frame.y * strideNibbles + frame.x + clip.left * stepX + clip.top * stepY;
+  for (int y = clip.top; y < clip.bottom; ++y, rowNibble += stepY) {
+    int source = y * width + clip.left;
+    int destination = rowNibble;
+    for (int remaining = clip.right - clip.left; remaining > 0; --remaining) {
+      const uint8_t value = twoBit ? ((bitmap[source >> 2] >> (6 - (source & 3) * 2)) & 3)
+                                   : ((bitmap[source >> 3] >> (7 - (source & 7))) & 1);
+      paintNibble(target.buffer, destination, levels[value]);
+      ++source;
+      destination += stepX;
+    }
+  }
+}
+
 }  // namespace glyphBitmap

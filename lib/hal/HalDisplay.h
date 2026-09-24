@@ -122,6 +122,21 @@ class HalDisplay {
   // the whole text body (a visible flash).
   bool combinesGrayscaleBase() const;
 
+  // Raw 16-level (4bpp) frames -- IT8951 (eMinimal) only; supportsGray4() is
+  // false on every other panel and while output is inverted, and
+  // displayGray4() then returns false having done nothing (use the plane
+  // path). displayGray4() loads `fb4` whole and refreshes it as a grayscale
+  // page (DU4, GC16 on the driver's ghost-clear cadence or for FULL/HALF),
+  // replacing displayGrayscaleBase + planes + displayGrayBuffer.
+  // Layout: the PHYSICAL framebuffer orientation (getDisplayWidth() x
+  // getDisplayHeight(), the same space the 1bpp framebuffer uses before panel
+  // rotation), packed rows of getDisplayWidthBytes() * 4 bytes, two pixels per
+  // byte with the left pixel in the high nibble, 0x0 black .. 0xF white;
+  // getGray4BufferSize() bytes in all. PSRAM is fine; read only, not retained.
+  bool supportsGray4() const;
+  uint32_t getGray4BufferSize() const;
+  bool displayGray4(const uint8_t* fb4, RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
+
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;

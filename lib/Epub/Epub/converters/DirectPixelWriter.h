@@ -26,6 +26,12 @@ struct DirectPixelWriter {
   // (originY 0, clipRows panelHeight) so the clip doubles as a bounds guard.
   int originY;
   int clipRows;
+  // 16-level target (GfxRenderer::beginGray4Target, IT8951 only): when set,
+  // writePixel() stores the pixel's 2bpp level x5 as a nibble (0x0 black,
+  // 0x5, 0xA, 0xF white) in this full physical 4bpp frame instead of a B/W or
+  // plane bit -- the value the base + LSB + MSB passes would have composed.
+  uint8_t* fb4 = nullptr;
+  uint32_t stride4 = 0;  // bytes per 4bpp row
 
   // Orientation is collapsed into a linear transform:
   //   phyX = phyXBase + x * phyXStepX + y * phyXStepY
@@ -44,6 +50,8 @@ struct DirectPixelWriter {
     mode = renderer.getRenderMode();
     absolute = renderer.grayPlanesAreAbsolute();
     displayWidthBytes = renderer.getDisplayWidthBytes();
+    fb4 = renderer.getGray4Target();
+    stride4 = renderer.getGray4Stride();
 
     const int phyW = renderer.getDisplayWidth();
     const int phyH = renderer.getDisplayHeight();
@@ -148,6 +156,10 @@ struct DirectPixelWriter {
   // Must be called after beginRow() for the current row.
   // No bounds checking — caller guarantees coordinates are valid.
   inline void writePixel(int logicalX, uint8_t pixelValue, bool writeWhiteInBw = false) const {
+    if (fb4) {
+      writeGray4(rowPhyXBase + logicalX * phyXStepX, rowPhyYBase + logicalX * phyYStepX, pixelValue, writeWhiteInBw);
+      return;
+    }
     // Determine whether to draw based on render mode
     bool draw;
     bool state;
@@ -187,6 +199,30 @@ struct DirectPixelWriter {
     } else {
       fb[byteIndex] |= bitMask;  // Set bit (draw white)
     }
+  }
+
+  // Random-access form for the 16-level target: any (logicalX, logicalY), no
+  // beginRow() needed. Lets a caller walk an image in the order that suits the
+  // 4bpp frame's memory layout (see ImageBlock's blocked walk). fb4 must be set.
+  inline void writePixelAt(int logicalX, int logicalY, uint8_t pixelValue) const {
+    writeGray4(phyXBase + logicalX * phyXStepX + logicalY * phyXStepY,
+               phyYBase + logicalX * phyYStepX + logicalY * phyYStepY, pixelValue, false);
+  }
+
+  // 16-level write: 2bpp level 0 black .. 3 white -> nibble level * 5. White
+  // (3) is background, left untouched like the B/W pass leaves it, unless the
+  // caller paints white explicitly (PNG alpha compositing).
+  inline void writeGray4(int phyX, int phyY, uint8_t pixelValue, bool writeWhite) const {
+    if (pixelValue >= 3 && !writeWhite) return;
+    // Full-frame target: originY is 0 and clipRows the panel height, so this is
+    // the same out-of-frame guard the B/W path applies.
+    if (static_cast<unsigned>(phyY) >= static_cast<unsigned>(clipRows)) return;
+    // A .pxc may be 1 px larger than the placed box (readValidCacheHeader's
+    // tolerance); never let that pixel spill into the next row or past the end.
+    if (static_cast<unsigned>(phyX) >= stride4 * 2u) return;
+    const uint8_t nibble = static_cast<uint8_t>((pixelValue > 3 ? 3 : pixelValue) * 5);
+    uint8_t& byte = fb4[static_cast<uint32_t>(phyY) * stride4 + (static_cast<uint32_t>(phyX) >> 1)];
+    byte = (phyX & 1) ? static_cast<uint8_t>((byte & 0xF0) | nibble) : static_cast<uint8_t>((byte & 0x0F) | (nibble << 4));
   }
 };
 
