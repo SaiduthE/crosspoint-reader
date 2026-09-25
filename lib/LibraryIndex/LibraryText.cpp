@@ -3,6 +3,7 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 
 namespace library {
@@ -173,8 +174,8 @@ bool isSingleCodepoint(const std::string_view text) {
 
 }  // namespace
 
-std::string fold(const std::string_view text, const bool stripArticle) {
-  std::string out;
+void foldInto(const std::string_view text, std::string& out, const bool stripArticle) {
+  out.clear();
   out.reserve(text.size());
 
   const auto* cursor = reinterpret_cast<const unsigned char*>(text.data());
@@ -235,6 +236,11 @@ std::string fold(const std::string_view text, const bool stripArticle) {
       }
     }
   }
+}
+
+std::string fold(const std::string_view text, const bool stripArticle) {
+  std::string out;
+  foldInto(text, out, stripArticle);
   return out;
 }
 
@@ -356,42 +362,77 @@ std::string authorKey(const std::string_view author) {
   return key;
 }
 
-// fold() keeps the apostrophe, which is right for sorting — "L'Eneide" belongs
-// under L. For searching it is wrong: in French the word worth typing is the one
-// AFTER the apostrophe, so "eneide" must reach "L'Eneide" and "cote" must
-// reach "d'a cote". Treating it as a word boundary here leaves the sort untouched.
-bool isWordBreak(const char c) { return c == ' ' || c == '\''; }
+namespace {
 
-bool matchesQuery(const std::string_view haystack, const std::string_view needle) {
-  if (needle.empty()) return true;
+// fold() leaves spaces between words and keeps apostrophes; search ignores both.
+bool isSearchBreak(const char c) { return c == ' ' || c == '\''; }
 
-  // Walk the query one word at a time, and for each one scan the book's words for
-  // a prefix hit. Both strings are at most a couple of hundred bytes and this
-  // runs once per book per keypress, so a plain scan is cheaper than anything
-  // that would need building first.
-  size_t qs = 0;
-  while (qs < needle.size()) {
-    while (qs < needle.size() && isWordBreak(needle[qs])) qs++;
-    if (qs >= needle.size()) break;
-    size_t qe = qs;
-    while (qe < needle.size() && !isWordBreak(needle[qe])) qe++;
-    const std::string_view word = needle.substr(qs, qe - qs);
-
-    bool found = false;
-    size_t hs = 0;
-    while (hs < haystack.size() && !found) {
-      while (hs < haystack.size() && isWordBreak(haystack[hs])) hs++;
-      if (hs >= haystack.size()) break;
-      if (haystack.compare(hs, word.size(), word) == 0) {
-        found = true;
-        break;
+// Is `word` inside `folded` once its breaks are skipped? "blackjack" is inside
+// "black jack". A plain scan: both sides are at most a few hundred bytes, and a
+// match cannot start mid-codepoint because a lead byte never equals a
+// continuation byte.
+bool containsIgnoringBreaks(const std::string_view folded, const std::string_view word) {
+  for (size_t start = 0; start < folded.size(); start++) {
+    if (isSearchBreak(folded[start])) continue;
+    size_t at = start;
+    size_t matched = 0;
+    while (matched < word.size() && at < folded.size()) {
+      if (isSearchBreak(folded[at])) {
+        at++;
+        continue;
       }
-      while (hs < haystack.size() && !isWordBreak(haystack[hs])) hs++;
+      if (folded[at] != word[matched]) break;
+      at++;
+      matched++;
     }
-    if (!found) return false;
-    qs = qe;
+    if (matched == word.size()) return true;
   }
-  return true;
+  return false;
+}
+
+}  // namespace
+
+SearchQuery::SearchQuery(const std::string_view query) {
+  // ASCII punctuation typed inside a word joins it, so "x-men" stays the one word
+  // that "X-Men" compacts to. The apostrophe stays for fold()'s elision strip.
+  std::string typed;
+  typed.reserve(query.size());
+  for (const char c : query) {
+    const auto byte = static_cast<unsigned char>(c);
+    if (byte < 0x80 && ispunct(byte) && c != '\'') continue;
+    typed.push_back(c);
+  }
+  // Article dropped as in the stored title folds: "the hobbit" looks for
+  // "hobbit", the only word the record keeps.
+  foldInto(typed, key, /*stripArticle=*/true);
+
+  // Apostrophes out in place; the split below skips any space run left behind.
+  size_t kept = 0;
+  for (size_t i = 0; i < key.size(); i++) {
+    if (key[i] != '\'') key[kept++] = key[i];
+  }
+  key.resize(kept);
+
+  // Views are taken only now, once `key` will not change again.
+  tokens.reserve(std::min<size_t>(static_cast<size_t>(std::count(key.begin(), key.end(), ' ')) + 1, MAX_WORDS));
+  size_t i = 0;
+  while (i < key.size() && tokens.size() < MAX_WORDS) {
+    while (i < key.size() && key[i] == ' ') i++;
+    const size_t begin = i;
+    while (i < key.size() && key[i] != ' ') i++;
+    if (i > begin) tokens.emplace_back(key.data() + begin, i - begin);
+  }
+}
+
+static_assert(SearchQuery::MAX_WORDS <= 32, "one bit per word in a uint32_t mask");
+
+bool SearchQuery::markFound(const std::string_view folded, uint32_t& found) const {
+  for (size_t i = 0; i < tokens.size(); i++) {
+    const uint32_t bit = 1u << i;
+    if ((found & bit) == 0 && containsIgnoringBreaks(folded, tokens[i])) found |= bit;
+  }
+  const uint32_t all = tokens.size() >= 32 ? 0xFFFFFFFFu : (1u << tokens.size()) - 1u;
+  return (found & all) == all;
 }
 
 std::string surnameKey(const std::string_view displayAuthor) {

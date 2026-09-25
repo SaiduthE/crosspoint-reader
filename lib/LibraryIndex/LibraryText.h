@@ -7,8 +7,8 @@
 // metadata; a book whose metadata carries no title falls back to its filename
 // stem, unparsed, and one with no author is grouped under Unknown.
 //
-// Pure functions over UTF-8, no hardware and no allocation beyond the returned
-// strings, so the whole unit is host-testable (test/library_text).
+// Pure code over UTF-8, no hardware and no allocation beyond the strings it
+// returns or holds, so the whole unit is host-testable (test/library_text).
 //
 // Design notes that are easy to get wrong and were measured on a real card
 // (docs/superpowers/specs/2026-08-05-addendum-a-findability.md, A2.1-A2.8):
@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace library {
 
@@ -52,6 +53,10 @@ std::string joinLibraryPath(std::string_view folder, std::string_view name);
 // `stripArticle` additionally removes one leading article ("the ", "le ", "la ",
 // ...) — correct for sort keys and search text, wrong for anything displayed.
 std::string fold(std::string_view text, bool stripArticle = false);
+
+// fold() into a caller-owned string, reusing its capacity, for loops that would
+// otherwise allocate once per book. `text` must not view `out`.
+void foldInto(std::string_view text, std::string& out, bool stripArticle = false);
 
 // First letter of an already-folded sort key, or 0 when the key starts with a
 // number/non-letter. The Library renders 0 as its shared '#' group.
@@ -84,22 +89,43 @@ std::string cleanPersonName(std::string_view author);
 // cut keeps "mary wollsto", still a prefix of the full key.
 std::string authorKey(std::string_view author);
 
-// Does a book match what has been typed so far?
+// A Library search, folded and split once per query.
 //
-// Both sides are already folded — accents stripped, case dropped, punctuation
-// turned to spaces — so "eneide" finds "L'Énéide" and "eluard" finds
-// "Éluard". `haystack` is the record's stored fold; `needle` is the query put
-// through the same fold.
+// Forgiving on purpose: case, accents, spaces, apostrophes and punctuation count
+// for nothing on either side, and a word may sit anywhere inside a field. So
+// "black jack" finds "BlackJack_EPUB" (blackjackepub) and "Give My Regards to
+// Black Jack". Words split on whitespace only; punctuation typed inside a word
+// joins it, so "x-men" is the one word "xmen". A leading article is dropped, as
+// it is from the stored title folds.
 //
-// Every query word must PREFIX some word of the book. That is the rule that fits
-// the hardware: with no partial refresh, each keypress costs a full ~185 ms panel
-// repaint, so the reader wants to stop typing as early as possible. "dar mat"
-// — six keys — finds "Wuthering Heights", where a plain substring test would demand the
-// whole of one word and give nothing for the effort of a second.
-//
-// An empty query matches everything, so the list is the unfiltered shelf before
-// the first key is pressed.
-bool matchesQuery(std::string_view haystack, std::string_view needle);
+// Every word must be found, each in any field of the book (title, author, file
+// name) and in any order. A query with no words matches everything.
+class SearchQuery {
+ public:
+  // One bit per word in markFound()'s mask; later words are ignored.
+  static constexpr size_t MAX_WORDS = 32;
+
+  explicit SearchQuery(std::string_view query);
+  // The word views point into `key`, so a copy or move would leave them dangling.
+  SearchQuery(const SearchQuery&) = delete;
+  SearchQuery& operator=(const SearchQuery&) = delete;
+
+  bool empty() const { return tokens.empty(); }
+  const std::vector<std::string_view>& words() const { return tokens; }
+
+  // Sets bit i of `found` for each word i that `folded` contains; true once
+  // every word is set. `folded` is fold() output or a record's stored fold.
+  // Start `found` at 0 for each book and pass it through each of its fields.
+  bool markFound(std::string_view folded, uint32_t& found) const;
+  bool matches(std::string_view folded) const {
+    uint32_t found = 0;
+    return markFound(folded, found);
+  }
+
+ private:
+  std::string key;  // the words, compacted, space-separated
+  std::vector<std::string_view> tokens;
+};
 
 // Ordering key for a shelf sorted by author: surname first, then the rest.
 // "Herman Melville" becomes "melville herman", so the shelf reads C where a library

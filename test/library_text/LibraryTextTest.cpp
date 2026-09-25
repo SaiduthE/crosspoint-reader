@@ -1,11 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <vector>
 
 #include "LibraryText.h"
 
 using library::authorKey;
 using library::fold;
+using library::SearchQuery;
 
 namespace {
 
@@ -90,7 +92,7 @@ TEST(LibraryFold, PunctuationSeparatesAndSpaceRunsCollapse) {
 
 TEST(LibraryFold, PreservesHebrewLettersAndDropsNiqqud) {
   EXPECT_EQ(fold("\u05E9\u05B8\u05C1\u05DC\u05D5\u05B9\u05DD"), "\u05E9\u05DC\u05D5\u05DD");
-  EXPECT_TRUE(library::matchesQuery(fold("\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD"), fold("\u05E9\u05DC")));
+  EXPECT_TRUE(library::SearchQuery("\u05E9\u05DC").matches(fold("\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD")));
   EXPECT_FALSE(authorKey("\u05E2\u05DE\u05D5\u05E1 \u05E2\u05D5\u05D6").empty());
 }
 
@@ -167,63 +169,133 @@ TEST(LibraryAuthorKey, FitsTheRecordFieldWithoutCollapsingToAForename) {
   EXPECT_TRUE(authorKey("Q. X. Z.").empty());  // initials only: no identity
 }
 
-// --- matchesQuery ------------------------------------------------------------
+// --- SearchQuery -------------------------------------------------------------
 //
 // Cases taken from the shape of the accented and
 // apostrophised titles real cards hold — what a naive matcher gets wrong.
 
-TEST(MatchesQuery, EmptyQueryMatchesEverything) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("Wuthering Heights"), ""));
+namespace {
+
+// One book searched the way the Library does it: the stored title fold (article
+// stripped), then the author, then the file name without its extension.
+bool finds(const char* query, const char* title, const char* author = "", const char* fileStem = "") {
+  const SearchQuery search(query);
+  uint32_t found = 0;
+  return search.markFound(fold(title, true), found) || search.markFound(fold(author), found) ||
+         search.markFound(fold(fileStem), found);
 }
 
-TEST(MatchesQuery, WholeWordMatches) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("Wuthering Heights"), library::fold("heights")));
+std::vector<std::string> wordsOf(const char* query) {
+  const SearchQuery search(query);
+  return std::vector<std::string>(search.words().begin(), search.words().end());
 }
 
-TEST(MatchesQuery, PrefixOfOneWordIsEnough) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("Wuthering Heights"), library::fold("hei")));
+}  // namespace
+
+TEST(LibrarySearch, EmptyQueryMatchesEverything) {
+  EXPECT_TRUE(SearchQuery("").empty());
+  EXPECT_TRUE(SearchQuery("").matches(fold("Wuthering Heights")));
+  EXPECT_TRUE(SearchQuery("!!!").matches(fold("Wuthering Heights")));
 }
 
-// The point of the whole design: six keypresses instead of ten, on a panel where
-// each one costs a full repaint.
-TEST(MatchesQuery, EveryWordMayBeAbbreviated) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("Wuthering Heights"), library::fold("wut hei")));
+TEST(LibrarySearch, WholeWordMatches) { EXPECT_TRUE(SearchQuery("heights").matches(fold("Wuthering Heights"))); }
+
+TEST(LibrarySearch, PrefixOfOneWordIsEnough) { EXPECT_TRUE(SearchQuery("hei").matches(fold("Wuthering Heights"))); }
+
+TEST(LibrarySearch, EveryWordMayBeAbbreviated) {
+  EXPECT_TRUE(SearchQuery("wut hei").matches(fold("Wuthering Heights")));
 }
 
-TEST(MatchesQuery, WordsNeedNotBeInOrder) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("Wuthering Heights"), library::fold("heights wuthering")));
+TEST(LibrarySearch, WordsNeedNotBeInOrder) {
+  EXPECT_TRUE(SearchQuery("heights wuthering").matches(fold("Wuthering Heights")));
 }
 
-TEST(MatchesQuery, EveryWordMustHit) {
-  EXPECT_FALSE(library::matchesQuery(library::fold("Wuthering Heights"), library::fold("wuthering blue")));
+TEST(LibrarySearch, EveryWordMustHit) {
+  EXPECT_FALSE(SearchQuery("wuthering blue").matches(fold("Wuthering Heights")));
 }
 
-// A prefix, not a substring: "eights" is inside "heights" but starts no word.
-TEST(MatchesQuery, MidWordDoesNotMatch) {
-  EXPECT_FALSE(library::matchesQuery(library::fold("Wuthering Heights"), library::fold("eights")));
+// A substring, not only a word start: typing any part of a name is enough.
+TEST(LibrarySearch, MidWordMatches) { EXPECT_TRUE(SearchQuery("eights").matches(fold("Wuthering Heights"))); }
+
+TEST(LibrarySearch, AccentsAreIgnoredOnBothSides) {
+  EXPECT_TRUE(SearchQuery("eneide").matches(fold("L'Énéide")));
+  EXPECT_TRUE(SearchQuery("énéide").matches(fold("L'Eneide")));
+  EXPECT_TRUE(SearchQuery("eluard").matches(fold("Éluard")));
 }
 
-TEST(MatchesQuery, AccentsAreIgnoredOnBothSides) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("L'Énéide"), library::fold("eneide")));
-  EXPECT_TRUE(library::matchesQuery(library::fold("L'Eneide"), library::fold("énéide")));
-  EXPECT_TRUE(library::matchesQuery(library::fold("Éluard"), library::fold("eluard")));
+TEST(LibrarySearch, ApostrophesAreIgnored) {
+  EXPECT_TRUE(SearchQuery("cote").matches(fold("Le bureau d'à côté")));
+  EXPECT_TRUE(SearchQuery("omalley").matches(fold("O'Malley")));
+  EXPECT_TRUE(SearchQuery("o'malley").matches(fold("OMalley")));
 }
 
-TEST(MatchesQuery, ApostropheSplitsWords) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("Le bureau d'à côté"), library::fold("cote")));
+TEST(LibrarySearch, CaseIsIgnored) { EXPECT_TRUE(SearchQuery("HEIGHTS").matches(fold("Wuthering Heights"))); }
+
+TEST(LibrarySearch, LeadingArticleIsDroppedLikeTheStoredFold) {
+  EXPECT_EQ(wordsOf("The Hobbit"), (std::vector<std::string>{"hobbit"}));
+  EXPECT_TRUE(finds("the hobbit", "The Hobbit"));
+  EXPECT_TRUE(finds("L\xE2\x80\x99\xC3\x89n\xC3\xA9ide", "L\xE2\x80\x99\xC3\x89n\xC3\xA9ide"));
 }
 
-TEST(MatchesQuery, CaseIsIgnored) {
-  EXPECT_TRUE(library::matchesQuery(library::fold("Wuthering Heights"), library::fold("HEIGHTS")));
+// Whitespace splits words; punctuation typed inside one joins it.
+TEST(LibrarySearch, WordsSplitOnWhitespaceOnly) {
+  EXPECT_EQ(wordsOf("Black Jack"), (std::vector<std::string>{"black", "jack"}));
+  EXPECT_EQ(wordsOf("  BlackJack_EPUB "), (std::vector<std::string>{"blackjackepub"}));
+  EXPECT_EQ(wordsOf("x-men"), (std::vector<std::string>{"xmen"}));
+  EXPECT_TRUE(SearchQuery("x-men").matches(fold("X-Men")));
 }
 
-// The stored fold is capped at 96 bytes, so a query word beyond that cannot be
-// found. Asserted rather than left implicit: it is the one place a search can
-// honestly fail to find a book that is really there.
-TEST(MatchesQuery, LongTitlesAreOnlySearchableWithinTheStoredFold) {
+// The report that motivated the forgiving rules.
+TEST(LibrarySearch, BlackJackFindsEverySpelling) {
+  constexpr const char* EPUB = "BlackJack_EPUB";
+  constexpr const char* XTC = "BlachJack_XTC";
+  constexpr const char* REGARDS = "Give My Regards to Black Jack";
+
+  for (const char* query : {"Black Jack", "black jack", "BLACKJACK"}) {
+    EXPECT_TRUE(finds(query, EPUB, "", EPUB)) << query;
+    EXPECT_TRUE(finds(query, REGARDS, "", REGARDS)) << query;
+    // "blachjackxtc" has "jack" but no "black": the misspelling is not forgiven.
+    EXPECT_FALSE(finds(query, XTC, "", XTC)) << query;
+  }
+
+  EXPECT_FALSE(finds("regards black", EPUB, "", EPUB));
+  EXPECT_FALSE(finds("regards black", XTC, "", XTC));
+  EXPECT_TRUE(finds("regards black", REGARDS, "", REGARDS));
+
+  EXPECT_FALSE(finds("xtc", EPUB, "", EPUB));
+  EXPECT_TRUE(finds("xtc", XTC, "", XTC));
+  EXPECT_FALSE(finds("xtc", REGARDS, "", REGARDS));
+
+  EXPECT_TRUE(finds("jack", XTC, "", XTC));
+}
+
+TEST(LibrarySearch, FileNameIsSearchedWhenTheTitleDiffers) {
+  EXPECT_TRUE(finds("black jack", "Burakku Jakku ni Yoroshiku", "Shuho Sato", "Give My Regards to Black Jack"));
+  EXPECT_FALSE(finds("black jack", "Burakku Jakku ni Yoroshiku", "Shuho Sato", "Volume 1"));
+}
+
+TEST(LibrarySearch, WordsMayComeFromDifferentFields) {
+  EXPECT_TRUE(finds("emma austen", "Emma", "Jane Austen"));
+  EXPECT_TRUE(finds("austen epub", "Emma", "Jane Austen", "Emma_EPUB"));
+  EXPECT_FALSE(finds("emma bronte", "Emma", "Jane Austen", "Emma"));
+}
+
+// A 32-word query fills the found mask; later words are ignored.
+TEST(LibrarySearch, WordCountIsCapped) {
+  std::string many;
+  for (int i = 0; i < 40; i++) many += "b ";
+  const SearchQuery search(many);
+  EXPECT_EQ(search.words().size(), SearchQuery::MAX_WORDS);
+  EXPECT_TRUE(search.matches(fold("b")));
+  EXPECT_FALSE(search.matches(fold("c")));
+}
+
+// The stored fold is capped at 96 bytes, so a title word beyond that cannot be
+// found there. The file name is still searched, which usually covers it.
+TEST(LibrarySearch, LongTitlesAreOnlySearchableWithinTheStoredFold) {
   const std::string longTitle(120, 'a');
-  const std::string folded = library::fold(longTitle + " needle").substr(0, 96);
-  EXPECT_FALSE(library::matchesQuery(folded, library::fold("needle")));
+  const std::string folded = fold(longTitle + " needle").substr(0, 96);
+  EXPECT_FALSE(SearchQuery("needle").matches(folded));
 }
 
 // --- inverted author names ---------------------------------------------------

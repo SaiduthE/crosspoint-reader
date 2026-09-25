@@ -17,7 +17,7 @@
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
-#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/TextEntryActivity.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/icons/listIcons.h"
@@ -424,8 +424,8 @@ void LibraryListActivity::openSearch() {
   // No key filtering here on purpose. Greying out the letters that lead nowhere
   // was built, tested on device and removed: a letter you can see but cannot
   // reach reads as a broken keyboard, and the eye keeps returning to it.
-  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_LIBRARY_SEARCH), query, 48,
-                                                           InputType::Text);
+  auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_LIBRARY_SEARCH), query, 48,
+                                                       InputType::Text);
   if (!keyboard) {
     LOG_ERR("LIB", "OOM: search keyboard");
     return;
@@ -609,10 +609,11 @@ void LibraryListActivity::restoreExpandedList() {
   requestUpdate();
 }
 
-// One pass over the sort order, keeping what matches. No index, no cache: at the
-// 4096-book format cap this is 4096 comparisons of at most 96 bytes. The result
-// array is allocated once with the exact upper bound and fails back to an
-// explicit message rather than letting vector growth abort the firmware.
+// One pass over the sort order, keeping what matches. No index, no cache: each
+// book costs its record plus, until every query word is found, its author and
+// file name. The result array is allocated once with the exact upper bound and
+// fails back to an explicit message rather than letting vector growth abort the
+// firmware.
 void LibraryListActivity::applyFilter() {
   groupsCollapsed = false;
   groupCount = 0;
@@ -624,9 +625,8 @@ void LibraryListActivity::applyFilter() {
   headerSearchTitle = query.empty() ? std::string() : "“" + query + "”";
   if (query.empty()) return;
 
-  // Folded the same way the stored folds were, articles removed included —
-  // otherwise "the hobbit" searches for a word no record contains.
-  const std::string needle = library::fold(query, /*stripArticle=*/true);
+  // Folded, compacted and split once; each book is then only compared.
+  const library::SearchQuery search(query);
   const int total = static_cast<int>(index.bookCount());
   if (total <= 0) return;
 
@@ -638,23 +638,36 @@ void LibraryListActivity::applyFilter() {
   }
 
   uint16_t matchCount = 0;
-  std::string author;
+  // Reused for every book, so the pass allocates a few times, not per book.
+  std::string text;
+  std::string folded;
+  text.reserve(256);
+  folded.reserve(256);
   for (int row = 0; row < total; row++) {
     const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(row));
     library::ClixRecord record{};
     if (ordinal == 0xFFFF || !index.readRecord(ordinal, record)) continue;
-    if (library::matchesQuery(std::string_view(record.fold, record.foldLen), needle)) {
-      matches[matchCount++] = static_cast<uint16_t>(row);
-      continue;
+    // Each word may be found in a different field. The title's fold is already
+    // in the record, so a book it settles costs no name-blob read.
+    uint32_t found = 0;
+    bool hit = search.markFound(std::string_view(record.fold, record.foldLen), found);
+    // The author is the search most worth having: the reader who knows the
+    // author usually also knows where the book is, while "emily" finding Alice
+    // Hunter is the case the shelf exists to answer.
+    if (!hit && index.readAuthor(record, text)) {
+      library::foldInto(text, folded);
+      hit = search.markFound(folded, found);
     }
-    // The stored fold covers the title only, so the author has to be read and
-    // folded here. That is the search most worth having: the reader who knows
-    // the author usually also knows where the book is, while "emily" finding
-    // Alice Hunter is the case the shelf exists to answer.
-    author.clear();
-    if (index.readAuthor(record, author) && library::matchesQuery(library::fold(author), needle)) {
-      matches[matchCount++] = static_cast<uint16_t>(row);
+    // Then the file name, extension dropped: the reader's own name for the book,
+    // often not the one its metadata gives.
+    if (!hit && index.readName(record, text)) {
+      std::string_view stem(text);
+      const size_t dot = stem.find_last_of('.');
+      if (dot != std::string_view::npos && dot > 0) stem = stem.substr(0, dot);
+      library::foldInto(stem, folded);
+      hit = search.markFound(folded, found);
     }
+    if (hit) matches[matchCount++] = static_cast<uint16_t>(row);
   }
   filtered = std::move(matches);
   filteredCount = matchCount;
