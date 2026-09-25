@@ -373,12 +373,24 @@ void EMinimalHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
     const auto& self = *static_cast<EMinimalHomeUi*>(user);
     const int index = tab.value - static_cast<int>(self.books->size());
     const int icon = !self.hasOpds && index >= 2 ? index + 1 : index;
-    self.renderer.drawIcon(homeIcons().tabs[icon], iconRect.x, iconRect.y, iconRect.width);
+    self.renderer.drawIcon(homeIcons().tabs[icon], iconRect.x, iconRect.y, iconRect.width, !tab.selected);
     return true;
   };
+  // Selected tab is a black pill with a white icon, matching the Settings tab
+  // pills and RoundedRaff's selected list rows (UiTabListActivity.cpp).
+  tabs.tabStyles.explicitlySet = true;
   tabs.tabStyles.normal.background = fui::Paint::solid(fui::Color::White);
-  tabs.tabStyles.selected.background = fui::Paint::solid(fui::Color::White);
-  tabs.selectedUnderline = px(2);
+  tabs.tabStyles.selected.background = fui::Paint::solid(fui::Color::Black);
+  tabs.tabStyles.selected.foreground = fui::Paint::solid(fui::Color::White);
+  tabs.tabStyles.selected.radius = screen.theme().listRowRadius;
+  tabs.tabStyles.focused = tabs.tabStyles.selected;
+  tabs.tabStyles.active = tabs.tabStyles.selected;
+  tabs.selectedUnderline = 0;
+  // Pill insets: taller than the icon (top/bottom) so the fill reads as a
+  // pill, not a square; left/right stay at the component default (4) because
+  // distributedSlotWidth and the overhang maths below derive from them.
+  tabs.tabInset = fui::Insets{px(12), 4, px(12), 4};
+  tabs.contentInset = fui::Insets{0, 0, 0, 0};
   // SpaceBetween pins the outer SLOTS to the bar's edges and centres each
   // icon in its slot. Fix the slot width (the widest-natural-tab width the
   // component would pick: a square pill twice the icon, plus the pill insets)
