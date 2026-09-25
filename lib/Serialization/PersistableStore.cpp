@@ -10,12 +10,13 @@
 
 namespace {
 
-bool fileHasContent(const char* path) {
+// Worth keeping as the backup: starts the way serializeJson writes a document.
+// An empty file, or one whose FAT entry points at another file's data, does not.
+bool looksLikeJson(const char* path) {
   auto f = Storage.open(path);
   if (!f) return false;
-  const size_t size = f.size();
-  f.close();
-  return size > 0;
+  const int first = f.read();
+  return first == '{' || first == '[';
 }
 
 // One attempt at path: false with a log line when the file is there but
@@ -54,15 +55,24 @@ bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& 
     return false;
   }
   if (Storage.exists(path)) {
-    const std::string bak = std::string(path) + ".bak";
-    if (keepBackup && fileHasContent(path)) {
-      Storage.remove(bak.c_str());  // FAT rename cannot replace an existing target
+    if (keepBackup && looksLikeJson(path)) {
+      const std::string bak = std::string(path) + ".bak";
+      // FAT rename cannot replace an existing target.
+      if (!Storage.remove(bak.c_str()) && Storage.exists(bak.c_str())) {
+        LOG_ERR("PERSIST", "Cannot remove %s; the card needs a filesystem check", bak.c_str());
+      }
       if (!Storage.rename(path, bak.c_str())) {
         LOG_ERR("PERSIST", "Failed to rotate %s to .bak", path);
         Storage.remove(path);
       }
-    } else {
-      Storage.remove(path);
+    } else if (!Storage.remove(path)) {
+      // A primary SdFat cannot remove (broken FAT chain) is moved aside, so it neither blocks the rename below
+      // nor displaces the good .bak.
+      const std::string bad = std::string(path) + ".bad";
+      Storage.remove(bad.c_str());
+      if (!Storage.rename(path, bad.c_str())) {
+        LOG_ERR("PERSIST", "Cannot move %s aside; the card needs a filesystem check", path);
+      }
     }
   }
   if (!Storage.rename(tmp.c_str(), path)) {
@@ -83,6 +93,10 @@ bool PersistableStoreBase::readDocFromFile(const char* path, JsonDocument& doc, 
   doc.clear();
   if (readDocAt(bak.c_str(), doc, bakExisted)) {
     LOG_ERR("PERSIST", "%s %s; loaded %s instead", path, existed ? "unreadable" : "missing", bak.c_str());
+    // Drop the bad primary so the caller's rewrite replaces it instead of rotating it over the good .bak.
+    if (existed && !Storage.remove(path)) {
+      LOG_ERR("PERSIST", "Cannot remove %s; the card needs a filesystem check", path);
+    }
     if (fromBackup) *fromBackup = true;
     return true;
   }

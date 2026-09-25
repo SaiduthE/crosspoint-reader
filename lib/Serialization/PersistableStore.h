@@ -49,16 +49,18 @@ class PersistableStoreBase {
   // Serializes doc and writes it to path (ensures /.crosspoint exists). Logs
   // on failure. The bytes go to a sibling .tmp that is renamed into place, so
   // a reset mid-write leaves the previous file, never a truncated one. With
-  // keepBackup the previous file is first rotated to .bak (only when it holds
-  // something: an empty current file must not evict a good backup) so
-  // readDocFromFile() has a fallback. The stores use it; per-book JSON does
-  // not need the second file.
+  // keepBackup the previous file is first rotated to .bak (only when it starts
+  // like JSON: an empty or damaged current file must not evict a good backup)
+  // so readDocFromFile() has a fallback. A damaged file that cannot be removed
+  // is moved aside to .bad. The stores use keepBackup; per-book JSON does not
+  // need the second file.
   static bool writeDocToFile(const char* path, const JsonDocument& doc, bool keepBackup = false);
 
   // Reads path and parses it into doc. Returns false silently when the file
   // does not exist (expected on first boot); logs on read/parse failure. When
   // path is missing, empty or unparseable and a .bak exists, loads that
-  // instead and sets *fromBackup, so the caller can rewrite the primary.
+  // instead, removes the unreadable path and sets *fromBackup, so the caller
+  // can rewrite the primary without rotating the bad file over the good .bak.
   static bool readDocFromFile(const char* path, JsonDocument& doc, bool* fromBackup = nullptr);
 
  protected:
