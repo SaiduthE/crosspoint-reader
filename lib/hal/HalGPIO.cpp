@@ -140,6 +140,13 @@ void HalGPIO::begin() {
 }
 
 void HalGPIO::update() {
+  // Drop wake-held keys whose (masked) release the previous update reported, then arm the mask.
+  if (wakeHeldKeys != 0) {
+    for (uint8_t i = BTN_BACK; i <= BTN_DOWN; ++i) {
+      if (!inputMgr.isPressed(i)) wakeHeldKeys &= static_cast<uint8_t>(~(1u << i));
+    }
+  }
+  wakeKeysMasked = wakeHeldKeys != 0;
   inputMgr.update();
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
@@ -148,23 +155,37 @@ void HalGPIO::update() {
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
-bool HalGPIO::isPressed(uint8_t buttonIndex) const { return inputMgr.isPressed(buttonIndex); }
+bool HalGPIO::isPressed(uint8_t buttonIndex) const {
+  return inputMgr.isPressed(buttonIndex) && !isWakeMasked(buttonIndex);
+}
 
 bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed(buttonIndex); }
 
 bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
 
-bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return inputMgr.wasReleased(buttonIndex); }
+bool HalGPIO::wasReleased(uint8_t buttonIndex) const {
+  return inputMgr.wasReleased(buttonIndex) && !isWakeMasked(buttonIndex);
+}
 
 bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased(); }
 
 bool HalGPIO::rawInputActive() {
   if (inputMgr.isPowerButtonPhysicallyPressed()) return true;
-  InputManager::ButtonAdcSample g1{}, g2{};
-  inputMgr.readButtonAdc(g1, g2);
-  // The Xteink ladder idles at the ADC full-scale rail (~4095); every button band sits below 3900.
-  constexpr int kIdleRailMin = 4000;
-  return (g1.raw >= 0 && g1.raw < kIdleRailMin) || (g2.raw >= 0 && g2.raw < kIdleRailMin);
+  if (BoardConfig::ACTIVE.inputStyle == BoardConfig::InputStyle::XteinkAdcLadder) {
+    InputManager::ButtonAdcSample g1{}, g2{};
+    inputMgr.readButtonAdc(g1, g2);
+    // The Xteink ladder idles at the ADC full-scale rail (~4095); every button band sits below 3900.
+    constexpr int kIdleRailMin = 4000;
+    return (g1.raw >= 0 && g1.raw < kIdleRailMin) || (g2.raw >= 0 && g2.raw < kIdleRailMin);
+  }
+  // Every other style wires its keys as active-low GPIOs that InputManager::begin() pulls up, read the way the
+  // SDK's getDigitalState() does (OnePage's ADC-ladder keys are not sampled). A key sharing the power pin was
+  // already read above at the power polarity.
+  const BoardConfig::InputPins& in = BoardConfig::ACTIVE.input;
+  for (const int8_t pin : {in.back, in.confirm, in.left, in.right, in.up, in.down}) {
+    if (pin >= 0 && pin != in.power && digitalRead(pin) == LOW) return true;
+  }
+  return false;
 }
 
 unsigned long HalGPIO::getHeldTime() const { return inputMgr.getHeldTime(); }
@@ -236,17 +257,34 @@ bool HalGPIO::verifyPowerButtonWakeup() {
   // stay down until POWER_WAKE_HOLD_MS after reset. Boot to this point is ~350 ms
   // (16 MB flash, 8 MB octal PSRAM), so the wait below is the remainder — about
   // a second from the press. A release before then returns false and setup()
-  // re-sleeps before the display or settings are touched; the SDK pulls the
-  // wake pin in the RTC domain, so a floating-pin ghost wake never gets here.
+  // re-sleeps before the display is touched (unless a click may wake); the SDK
+  // pulls the wake pin in the RTC domain, so a floating-pin ghost wake never
+  // gets here.
   if (BoardConfig::isEMinimal78()) {
     constexpr unsigned long POWER_WAKE_HOLD_MS = 700;
-    while (millis() < POWER_WAKE_HOLD_MS) {
-      if (!inputMgr.isPowerButtonPhysicallyPressed()) {
-        return false;
-      }
+    bool held = inputMgr.isPowerButtonPhysicallyPressed();
+    while (held && millis() < POWER_WAKE_HOLD_MS) {
       delay(5);
+      held = inputMgr.isPowerButtonPhysicallyPressed();
     }
-    return inputMgr.isPowerButtonPhysicallyPressed();
+    // Commit the keys held now to the debounced state, as the branch below does, so setup() can read them
+    // (Power+Up recovery, Back to Home) before loop() first polls. The commit is a non-edge by then: the next
+    // update() clears its press events. Capped in case a contact chatters.
+    constexpr unsigned long SETTLE_MIN_MS = 10;  // past InputManager's 5 ms debounce
+    constexpr unsigned long SETTLE_MAX_MS = 40;
+    const unsigned long settleStart = millis();
+    inputMgr.update();
+    while (millis() - settleStart < SETTLE_MAX_MS &&
+           (millis() - settleStart < SETTLE_MIN_MS || inputMgr.isDebouncePending())) {
+      delay(1);
+      inputMgr.update();
+    }
+    uint8_t heldKeys = 0;
+    for (uint8_t i = BTN_BACK; i <= BTN_DOWN; ++i) {
+      if (inputMgr.isPressed(i)) heldKeys |= static_cast<uint8_t>(1u << i);
+    }
+    wakeHeldKeys = heldKeys;
+    return held;
   }
 
   constexpr unsigned long POWER_WAKE_STABILITY_MS = 10;

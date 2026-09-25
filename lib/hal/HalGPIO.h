@@ -46,6 +46,13 @@ class HalGPIO {
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
 
+  // Front keys (BTN_* bits) held at the end of the e-Minimal wake hold. setup() still reads them (Power+Up
+  // recovery, Back to Home); from the first update() on they read as up, release edge included, until lifted, so
+  // the wake gesture never also acts in the first activity.
+  uint8_t wakeHeldKeys = 0;
+  bool wakeKeysMasked = false;
+  bool isWakeMasked(uint8_t buttonIndex) const { return wakeKeysMasked && (wakeHeldKeys & (1u << buttonIndex)) != 0; }
+
  public:
   enum class DeviceType : uint8_t { X4, X3 };
 
@@ -79,8 +86,9 @@ class HalGPIO {
   unsigned long getHeldTime() const;
   unsigned long getPowerButtonHeldTime() const;
   // True when any button contact is closed right now, read straight from the
-  // hardware (ADC ladder off its idle rail, or the power GPIO asserted), without
-  // going through the debounced state. Cheap enough to call every few ms.
+  // hardware (ADC ladder off its idle rail, a digital key pin low, or the power
+  // GPIO asserted), without going through the debounced state. Cheap enough to
+  // call every few ms.
   bool rawInputActive();
   bool hasTouch() const;
   // Capacitive Home key reported by the touch controller (X4 Pro). The tap
