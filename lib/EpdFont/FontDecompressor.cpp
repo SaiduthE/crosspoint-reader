@@ -361,6 +361,9 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     }
   }
 
+  // Only blank glyphs (a lone space): nothing to extract, and ESP-IDF returns null for a 0-byte malloc.
+  if (totalBytes == 0) return 0;
+
   stats.uniqueGroupsAccessed = groupCount;
 
   // Step 3: Allocate page buffer and lookup table for this slot
