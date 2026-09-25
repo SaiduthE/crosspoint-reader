@@ -46,7 +46,8 @@ constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
 // of these must mark the index dirty so the next Library entry rebuilds it.
 bool isLibraryBookFile(const String& filename) {
   return FsHelpers::checkFileExtension(filename, ".epub") || FsHelpers::checkFileExtension(filename, ".txt") ||
-         FsHelpers::checkFileExtension(filename, ".md") || FsHelpers::checkFileExtension(filename, ".xtc");
+         FsHelpers::checkFileExtension(filename, ".md") || FsHelpers::checkFileExtension(filename, ".xtc") ||
+         FsHelpers::checkFileExtension(filename, ".xtch");
 }
 constexpr uint16_t UDP_PORTS[] = {54982, 48123, 39001, 44044, 59678};
 constexpr uint16_t LOCAL_UDP_PORT = 8134;
