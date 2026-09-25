@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Type for your reader – e-Minimal</title>
+    <link rel="stylesheet" href="/css/app.css" />
+    <style>
+      main {
+        max-width: calc(480px + 2 * var(--gutter));
+        padding-top: 32px;
+      }
+      h1 {
+        margin-bottom: 24px;
+        overflow-wrap: anywhere;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      #send {
+        margin-top: 8px;
+      }
+      #count {
+        text-align: right;
+      }
+      #status {
+        margin-top: 16px;
+        min-height: 1.5em;
+        overflow-wrap: anywhere;
+      }
+      #status:empty {
+        display: none;
+      }
+      #status.error {
+        color: var(--danger);
+      }
+      #status.ok {
+        color: var(--ok);
+      }
+      .muted {
+        font-size: 0.875rem;
+        max-width: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Type for your reader</h1>
+      <div class="card">
+        <form id="form" autocomplete="off" novalidate>
+          <div class="field">
+            <div class="field-row">
+              <input
+                type="text"
+                id="text"
+                name="text"
+                aria-labelledby="title"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
+                enterkeyhint="send"
+              />
+              <button type="button" class="btn" id="toggle" hidden>Show</button>
+            </div>
+            <span class="field-hint" id="count"></span>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" id="send">Send to reader</button>
+        </form>
+        <div id="status" role="status" aria-live="polite"></div>
+      </div>
+      <p class="muted">
+        The reader fills in the field as soon as the text arrives, then stops serving this page. If it raised its own
+        hotspot, your phone goes back to its usual network.
+      </p>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const form = $("form"), input = $("text"), send = $("send"), toggle = $("toggle"), count = $("count");
+      const status = $("status");
+      const encoder = new TextEncoder();
+      let maxBytes = 256;
+
+      function setStatus(text, cls) {
+        status.className = cls || "";
+        status.textContent = text;
+      }
+
+      function fetchTimeout(url, opts, ms) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ms);
+        return fetch(url, Object.assign({ cache: "no-store", signal: ctrl.signal }, opts || {})).finally(() =>
+          clearTimeout(timer)
+        );
+      }
+
+      function byteLength(s) {
+        return encoder.encode(s).length;
+      }
+
+      function updateCount() {
+        const n = byteLength(input.value);
+        count.textContent = n + " / " + maxBytes;
+        count.className = "field-hint" + (n > maxBytes ? " text-danger" : "");
+      }
+
+      function setLocked(locked) {
+        input.disabled = locked;
+        toggle.disabled = locked;
+        send.disabled = locked;
+      }
+
+      function showSent() {
+        setLocked(true);
+        send.textContent = "Sent";
+        setStatus("Sent. You can close this page.", "ok");
+      }
+
+      input.addEventListener("input", updateCount);
+
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const value = input.value;
+        if (/[\u0000-\u001f]/.test(value)) {
+          setStatus("Line breaks and tabs can't be sent to the reader.", "error");
+          return;
+        }
+        if (byteLength(value) > maxBytes) {
+          setStatus("That is too long for this field.", "error");
+          return;
+        }
+        setLocked(true);
+        send.textContent = "Sending…";
+        setStatus("Sending to the reader…");
+        try {
+          const r = await fetchTimeout(
+            "/api/text",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: value }),
+            },
+            5000
+          );
+          // 409: the reader already took an answer for this field.
+          if (!r.ok && r.status !== 409) throw new Error(await r.text());
+          showSent();
+        } catch (e) {
+          setLocked(false);
+          send.textContent = "Send to reader";
+          setStatus("The reader did not take that: " + (e.message || e), "error");
+        }
+      });
+
+      toggle.addEventListener("click", () => {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        toggle.textContent = show ? "Hide" : "Show";
+      });
+
+      (async () => {
+        try {
+          const s = await (await fetchTimeout("/api/text", {}, 4000)).json();
+          if (s.title) {
+            $("title").textContent = s.title;
+            document.title = s.title;
+          }
+          if (s.maxBytes > 0) maxBytes = s.maxBytes;
+          // A UTF-8 byte limit never allows fewer UTF-16 units, so this only
+          // stops typing that the byte check would refuse anyway.
+          input.maxLength = maxBytes;
+          if (s.kind === "password") {
+            input.type = "password";
+            input.autocomplete = "off";
+            toggle.hidden = false;
+          } else if (s.kind === "url") {
+            input.inputMode = "url";
+          }
+          if (typeof s.text === "string") input.value = s.text;
+          updateCount();
+          if (s.state === "received") {
+            showSent();
+            return;
+          }
+          input.focus();
+          const end = input.value.length;
+          try {
+            input.setSelectionRange(end, end);
+          } catch (e) {}
+        } catch (e) {
+          setStatus("Could not reach the reader. Is this phone on its network?", "error");
+        }
+      })();
+    </script>
+  </body>
+</html>

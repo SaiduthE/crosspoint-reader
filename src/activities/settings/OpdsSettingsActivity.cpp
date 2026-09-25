@@ -3,10 +3,11 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
-#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/TextEntryActivity.h"
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
@@ -107,9 +108,13 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SERVER_NAME),
-                                                                   editServer.name, 63, InputType::Text),
-                           handler);
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_SERVER_NAME),
+                                                          editServer.name, 63, InputType::Text);
+    if (!keyboard) {
+      LOG_ERR("OPS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard), handler);
   } else if (nav.selected == 1) {
     // Server URL
     const std::string prefillUrl = editServer.url.empty() ? "https://" : editServer.url;
@@ -121,9 +126,13 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_OPDS_SERVER_URL),
-                                                                   prefillUrl, 127, InputType::Url),
-                           handler);
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_OPDS_SERVER_URL),
+                                                          prefillUrl, 127, InputType::Url);
+    if (!keyboard) {
+      LOG_ERR("OPS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard), handler);
   } else if (nav.selected == 2) {
     // Username
     auto handler = [this](const ActivityResult& result) {
@@ -134,9 +143,13 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_USERNAME),
-                                                                   editServer.username, 63, InputType::Text),
-                           handler);
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_USERNAME),
+                                                          editServer.username, 63, InputType::Text);
+    if (!keyboard) {
+      LOG_ERR("OPS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard), handler);
   } else if (nav.selected == 3) {
     // Password
     auto handler = [this](const ActivityResult& result) {
@@ -147,9 +160,13 @@ void OpdsSettingsActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_PASSWORD),
-                                                                   editServer.password, 63, InputType::Text),
-                           handler);
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_PASSWORD),
+                                                          editServer.password, 63, InputType::Password);
+    if (!keyboard) {
+      LOG_ERR("OPS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard), handler);
   } else if (nav.selected == 4 && !isNewServer) {
     // Delete flow is only available for existing servers.
     if (!OPDS_STORE.removeServer(static_cast<size_t>(serverIndex))) {

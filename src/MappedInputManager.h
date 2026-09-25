@@ -119,6 +119,8 @@ class MappedInputManager {
                               const char* up, const char* down) const;
   // Returns the raw front button index that was pressed this frame (or -1 if none).
   int getPressedFrontButton() const;
+  // Same scan for a release this frame.
+  int getReleasedFrontButton() const;
 
   // True when the control axis is flipped relative to the physical buttons: always on touch boards,
   // or when button-only boards opt in, while the screen is currently INVERTED / LANDSCAPE_CCW.
@@ -136,6 +138,9 @@ class MappedInputManager {
   Button mapScreenDirection(Button button) const;
   Labels mapFrontLabels(const char* back, const char* confirm, const char* left, const char* right) const;
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
+  // Hardware key behind logical Up (up = true) or Down.
+  uint8_t upDownKey(bool up) const;
+  int scanFrontButtons(bool (HalGPIO::*fn)(uint8_t) const) const;
   // SDK edge classification (fui::edgeSwipe) + the shared decode/held-time
   // bookkeeping; the wrappers below give each edge its board meaning.
   bool wasEdgeSwipe(freeink::ui::ScreenEdge edge) const;

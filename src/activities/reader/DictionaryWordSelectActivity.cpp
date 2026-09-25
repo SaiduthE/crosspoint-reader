@@ -13,6 +13,7 @@
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
 #include "components/UITheme.h"
+#include "util/FiveButtonInput.h"
 
 namespace {
 
@@ -270,6 +271,36 @@ void DictionaryWordSelectActivity::loop() {
     return;
   }
 
+  // No front Left/Right on this board: Up/Down double as word step (release)
+  // and line jump (hold), replacing the ScreenLeft/Right + ScreenUp/Down
+  // handling below.
+  if (five_button::active()) {
+    const bool upPressed = mappedInput.isPressed(MappedInputManager::Button::Up);
+    const bool downPressed = mappedInput.isPressed(MappedInputManager::Button::Down);
+    const unsigned long now = millis();
+    if ((upPressed || downPressed) && mappedInput.getHeldTime() >= LINE_HOLD_START_MS &&
+        now - lastLineHoldTime >= LINE_HOLD_REPEAT_MS) {
+      moveVertical(upPressed ? -1 : 1);
+      lastLineHoldTime = now;
+      lineHoldFired = true;
+    }
+    const bool hasNextWord = selected + 1 < static_cast<int>(words.size());
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
+      if (!lineHoldFired && selected > 0) {
+        selected--;
+        requestUpdate();
+      }
+      lineHoldFired = false;
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+      if (!lineHoldFired && hasNextWord) {
+        selected++;
+        requestUpdate();
+      }
+      lineHoldFired = false;
+    }
+    return;
+  }
+
   const bool hasNextWord = selected + 1 < static_cast<int>(words.size());
   const unsigned long now = millis();
   const bool repeat =
@@ -339,6 +370,11 @@ void DictionaryWordSelectActivity::drawHints() const {
   // anything and only Back is hinted.
   if (words.empty()) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    return;
+  }
+  if (five_button::active()) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_LOOKUP), tr(STR_PREV_WORD), tr(STR_NEXT_WORD));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     return;
   }

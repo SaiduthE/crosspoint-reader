@@ -15,7 +15,7 @@
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
-#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/TextEntryActivity.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
@@ -449,8 +449,8 @@ void FileBrowserActivity::startRename() {
   const std::string extension = getFileExtension(oldEntry);
   const std::string initialStem = utf8ComposeNfc(oldEntry.substr(0, oldEntry.size() - extension.size()));
   const size_t maxStemLength = NAME_BUFFER_SIZE - extension.size() - 1;
-  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), initialStem,
-                                                           maxStemLength, InputType::Text);
+  auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_RENAME), initialStem,
+                                                       maxStemLength, InputType::Text);
   if (!keyboard) {
     LOG_ERR("FileBrowser", "OOM: rename keyboard");
     return;

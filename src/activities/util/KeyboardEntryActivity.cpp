@@ -11,6 +11,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/FiveButtonInput.h"
 
 namespace fui = freeink::ui;
 
@@ -141,6 +142,9 @@ void KeyboardEntryActivity::onEnter() {
   touchRouter.holdMs = TOUCH_LONG_PRESS_MS;
   touchRouter.overrideHoldMs = TOUCH_DEL_LONG_PRESS_MS;
   interactionsReady = false;
+  linearNav = five_button::active();
+  // The walk starts on the first letter row, past the number row.
+  if (linearNav) selRow = currentLayout().rowCount > 4 ? 1 : 0;
   requestUpdate();
 }
 
@@ -206,6 +210,25 @@ void KeyboardEntryActivity::moveSelectionCol(const int delta) {
   const int cols = layout.rows[selRow].count;
   if (cols <= 0) return;
   selCol = (selCol + delta + cols) % cols;
+}
+
+void KeyboardEntryActivity::stepKey(const int delta) {
+  const fui::KeyboardLayout& layout = currentLayout();
+  int total = 0;
+  for (int r = 0; r < layout.rowCount; r++) total += layout.rows[r].count;
+  if (total <= 0) return;
+  clampSelection();
+  int index = (selectedLogicalIndex() + delta) % total;
+  if (index < 0) index += total;
+  for (int r = 0; r < layout.rowCount; r++) {
+    const int cols = layout.rows[r].count;
+    if (index < cols) {
+      selRow = r;
+      selCol = index;
+      return;
+    }
+    index -= cols;
+  }
 }
 
 bool KeyboardEntryActivity::syncSelectionToValue(const int16_t value) {
@@ -521,7 +544,68 @@ fui::Rect KeyboardEntryActivity::keyboardRect() const {
                    static_cast<int16_t>(height)};
 }
 
+void KeyboardEntryActivity::loopLinear() {
+  // Holds before releases: a fired hold swallows its own release.
+  if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, SUBMIT_HOLD_MS)) {
+    onComplete(text);
+    return;
+  }
+  if (mappedInput.wasLongPressed(MappedInputManager::Button::Back, CANCEL_HOLD_MS)) {
+    onCancel();
+    return;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    const fui::KeyboardKey* key = selectedKey();
+    if (!key) {
+      clampSelection();
+      requestUpdate();
+      return;
+    }
+    const int16_t value = key->value;
+    const bool layerKey = value == fui::QWERTY_KEY_SHIFT || value == fui::QWERTY_KEY_MODE ||
+                          value == fui::QWERTY_KEY_LANG || value == URL_PANEL_KEY;
+    if (activateValue(value, false)) {
+      // A new layer has a different shape: stay on the key that switched it.
+      if (layerKey && !syncSelectionToValue(value)) clampSelection();
+      requestUpdate();
+    }
+    return;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    if (text.empty()) {
+      onCancel();
+      return;
+    }
+    if (backspaceUtf8()) requestUpdate();
+    return;
+  }
+
+  keyRepeat.onNextRelease([this] {
+    stepKey(1);
+    requestUpdate();
+  });
+  keyRepeat.onPreviousRelease([this] {
+    stepKey(-1);
+    requestUpdate();
+  });
+  keyRepeat.onNextContinuous([this] {
+    stepKey(1);
+    requestUpdate();
+  });
+  keyRepeat.onPreviousContinuous([this] {
+    stepKey(-1);
+    requestUpdate();
+  });
+}
+
 void KeyboardEntryActivity::loop() {
+  if (linearNav) {
+    loopLinear();
+    return;
+  }
+
   int tx = 0;
   int ty = 0;
 
@@ -856,7 +940,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     renderer.drawLine(cX + 1, cBottom, cX + serifW, cBottom, 2, true);
   }
 
-  if (isPassword) {
+  if (isPassword && !linearNav) {
     const char* toggleLabel = passwordVisible ? "[***]" : "[abc]";
     const int toggleWidth = renderer.getTextWidth(UI_12_FONT_ID, toggleLabel);
     const int toggleX = pageWidth - effectiveMargin - toggleWidth;
@@ -871,7 +955,8 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  if (hintVisible && !text.empty()) {
+  // The linear walk has no cursor mode for these hints to explain.
+  if (!linearNav && hintVisible && !text.empty()) {
     const int hintLh = renderer.getLineHeight(SMALL_FONT_ID);
     const int underlineY = inputStartY + inputHeight + lineHeight + metrics.verticalSpacing;
     const int hintY = underlineY + 4;
@@ -903,7 +988,9 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   auto drawTip = [&](const char* tip, int y) { renderer.drawCenteredText(SMALL_FONT_ID, y, tip, true); };
 
   int tipCount = 0;
-  if (cursorMode) {
+  if (linearNav) {
+    tipCount = 2;
+  } else if (cursorMode) {
     tipCount = 1;
   } else if (urlPanel) {
     tipCount = 1 + (!text.empty() ? 1 : 0);
@@ -917,7 +1004,11 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     int y = (underlineBottom + kbRect.y) / 2 - (tipCount + 1) * tipsLh / 2;
     drawTip(tr(STR_KB_TIPS), y);
     y += tipsLh;
-    if (cursorMode) {
+    if (linearNav) {
+      drawTip(tr(STR_KB_FIVE_MOVE), y);
+      y += tipsLh;
+      drawTip(tr(STR_KB_FIVE_EDIT), y);
+    } else if (cursorMode) {
       drawTip(tr(STR_KB_HINT_RETURN_KEYBOARD), y);
     } else if (urlPanel) {
       drawTip(tr(STR_KB_HINT_EXIT_URL_MODE), y);
@@ -990,10 +1081,17 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   interactions.publish();
   interactionsReady = true;
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-
-  GUI.drawSideButtonHints(renderer, ">", "<");
+  if (linearNav) {
+    // Up/Down are labelled in the bottom hints; the side-button hint boxes
+    // sit at another board's button positions.
+    const auto labels =
+        mappedInput.mapLabels(tr(STR_DELETE), tr(STR_KB_TYPE), tr(STR_KB_PREV_KEY), tr(STR_KB_NEXT_KEY));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  } else {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    GUI.drawSideButtonHints(renderer, ">", "<");
+  }
 
   renderer.displayBuffer();
 }

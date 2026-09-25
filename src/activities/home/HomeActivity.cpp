@@ -24,12 +24,13 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/FiveButtonInput.h"
 
 namespace {
-// The e-Minimal home (four buttons, no front Left/Right) walks flat: Up/Down
-// go current book -> grid row by row -> tabs, wrapping at both ends; holding
-// Down jumps to the tabs and holding Up back to the current book. Upstream's
-// Cover Grid keeps its split navigation.
+// The e-Minimal home walks flat: Up/Down go current book -> grid row by row
+// -> tabs, wrapping at both ends; holding Down jumps to the tabs and holding
+// Up back to the current book. Cover Grid keeps its split navigation only on
+// boards with front Left/Right; five-button boards use this flat walk.
 constexpr unsigned long COVER_GRID_JUMP_MS = 700;
 }  // namespace
 
@@ -345,9 +346,11 @@ void HomeActivity::loop() {
   };
 
   // Cover grid home splits navigation by button group (see below); the flat
-  // next/previous cycle is for the classic list home, and for the cover grid
-  // on the e-Minimal home (four buttons, no front Left/Right).
-  if (eminimalUi) {
+  // next/previous cycle is for the classic list home, for the e-Minimal
+  // theme's own grid, and for upstream's Cover Grid when this board has no
+  // front Left/Right (five_button::active()).
+  const bool flatWalk = eminimalUi || (coverGridUi && five_button::active());
+  if (flatWalk) {
     // Steps land on release, so a hold jumps between the bands without a step
     // first; wasLongPressed() swallows the release that follows it.
     const int bookCount = static_cast<int>(recentBooks.size());
@@ -413,7 +416,7 @@ void HomeActivity::loop() {
       activateSelection();
       return;
     }
-    if (eminimalUi) return;
+    if (flatWalk) return;
     // Side page buttons walk the covers, front Left/Right walk the tabs
     // (selectorIndex is flat: books first, then the tab items). A press while
     // selection sits in the other band jumps into this band first.
@@ -504,11 +507,13 @@ void HomeActivity::render(RenderLock&&) {
     } else {
       UITheme::getInstance().drawCoverGridHome(*coverGridUi);
     }
-    // Front Left/Right walk the tabs, so their hints read Left/Right; the
-    // side page buttons (unhinted) walk the covers. The flat walk is Up/Down.
+    // Front Left/Right walk the tabs, so their hints read Left/Right; the side
+    // page buttons (unhinted) walk the covers. flatWalk boards (e-Minimal
+    // theme, or Cover Grid with no front Left/Right) walk Up/Down instead.
+    const bool flatWalk = eminimalUi || (coverGridUi && five_button::active());
     const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
-                                              eminimalUi ? tr(STR_DIR_UP) : tr(STR_DIR_LEFT),
-                                              eminimalUi ? tr(STR_DIR_DOWN) : tr(STR_DIR_RIGHT));
+                                              flatWalk ? tr(STR_DIR_UP) : tr(STR_DIR_LEFT),
+                                              flatWalk ? tr(STR_DIR_DOWN) : tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
                                                                    : HalDisplay::FAST_REFRESH);

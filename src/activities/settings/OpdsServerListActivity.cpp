@@ -13,7 +13,7 @@
 #include "OpdsSettingsActivity.h"
 #include "activities/ActivityManager.h"
 #include "activities/browser/OpdsBookBrowserActivity.h"
-#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/TextEntryActivity.h"
 #include "components/UITheme.h"
 #include "util/OpdsFilename.h"
 
@@ -162,10 +162,14 @@ void OpdsServerListActivity::handleSelection() {
         requestUpdate();
       }
     };
-    startActivityForResult(
-        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_OPDS_DOWNLOAD_FOLDER),
-                                                std::string(SETTINGS.opdsDownloadFolder), 63, InputType::Text),
-        folderHandler);
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_OPDS_DOWNLOAD_FOLDER),
+                                                          std::string(SETTINGS.opdsDownloadFolder), 63,
+                                                          InputType::Text);
+    if (!keyboard) {
+      LOG_ERR("OPS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard), folderHandler);
     return;
   }
 

@@ -22,6 +22,7 @@ struct WifiNetworkInfo {
   bool isEncrypted;
   bool hasSavedPassword;             // Whether we have saved credentials for this network
   bool isHiddenPlaceholder = false;  // Synthetic "Add hidden network..." list entry
+  bool isRescanPlaceholder = false;  // Synthetic "Scan again" list entry (no front Left/Right to rescan with)
   uint8_t channel = 0;               // From the scan; the phone-setup portal is raised on it
 };
 

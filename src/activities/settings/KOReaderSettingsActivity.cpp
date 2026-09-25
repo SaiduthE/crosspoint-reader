@@ -2,6 +2,8 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <Memory.h>
 
 #include <memory>
 #include <string>
@@ -9,7 +11,7 @@
 #include "KOReaderAuthActivity.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
-#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/TextEntryActivity.h"
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
@@ -40,8 +42,13 @@ void KOReaderSettingsActivity::activateIndex(const int index) {
   app.clearTapFlash();
   if (index == 0) {
     // Username
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_USERNAME),
-                                                                   KOREADER_STORE.getUsername(), 64, InputType::Text),
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_USERNAME),
+                                                          KOREADER_STORE.getUsername(), 64, InputType::Text);
+    if (!keyboard) {
+      LOG_ERR("KOS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard),
                            [this](const ActivityResult& result) {
                              if (!result.isCancelled) {
                                const auto& kb = std::get<KeyboardResult>(result.data);
@@ -51,8 +58,13 @@ void KOReaderSettingsActivity::activateIndex(const int index) {
                            });
   } else if (index == 1) {
     // Password
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_PASSWORD),
-                                                                   KOREADER_STORE.getPassword(), 64, InputType::Text),
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_PASSWORD),
+                                                          KOREADER_STORE.getPassword(), 64, InputType::Password);
+    if (!keyboard) {
+      LOG_ERR("KOS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard),
                            [this](const ActivityResult& result) {
                              if (!result.isCancelled) {
                                const auto& kb = std::get<KeyboardResult>(result.data);
@@ -64,8 +76,13 @@ void KOReaderSettingsActivity::activateIndex(const int index) {
     // Sync Server URL - prefill with https:// if empty to save typing
     const std::string currentUrl = KOREADER_STORE.getServerUrl();
     const std::string prefillUrl = currentUrl.empty() ? "https://" : currentUrl;
-    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SYNC_SERVER_URL),
-                                                                   prefillUrl, 128, InputType::Url),
+    auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_SYNC_SERVER_URL),
+                                                          prefillUrl, 128, InputType::Url);
+    if (!keyboard) {
+      LOG_ERR("KOS", "OOM: TextEntryActivity");
+      return;
+    }
+    startActivityForResult(std::move(keyboard),
                            [this](const ActivityResult& result) {
                              if (!result.isCancelled) {
                                const auto& kb = std::get<KeyboardResult>(result.data);

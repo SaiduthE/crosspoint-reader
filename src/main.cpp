@@ -456,10 +456,11 @@ void setup() {
 
   // X4 Pro and X4 Classic both map BTN_UP to GPIO0 — an ESP32-S3 boot strap — so
   // gate recovery on the non-strap Down key (GPIO7) to avoid a stuck-in-recovery loop.
-  const auto recoveryButton = (BoardConfig::isX4Pro() || BoardConfig::isX4Classic()) ? MappedInputManager::Button::Down
-                                                                                     : MappedInputManager::Button::Up;
+  // Physical key, not the user's key map: a rescue path, and SETTINGS isn't loaded yet.
+  const uint8_t recoveryButton =
+      (BoardConfig::isX4Pro() || BoardConfig::isX4Classic()) ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP;
   const bool recoveryFirmwareMode = wakeupReason == HalGPIO::WakeupReason::PowerButton && !BoardConfig::isPaperMono() &&
-                                    mappedInputManager.isPressed(recoveryButton);
+                                    gpio.isPressed(recoveryButton);
 
   halTiltSensor.begin();
   halClock.begin();
@@ -628,7 +629,7 @@ void setup() {
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
-    // crashed (indicated by readerActivityLoadCount > 0)
+    // crashed (indicated by readerActivityLoadCount > 0). Back is logical here: the user's own Back key.
     activityManager.goHome(HomeMenuItem::NONE, needsWakeRefresh);
   } else {
     // Clear app state to avoid getting into a boot loop if the epub doesn't load
@@ -768,6 +769,7 @@ void loop() {
 
   static bool screenshotButtonsReleased = true;
   static bool screenshotComboActive = false;
+  // Physical keys: the chord (and the power-hold guards below) ignore the key map.
   if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.isPressed(HalGPIO::BTN_DOWN)) {
     screenshotComboActive = true;
     if (screenshotButtonsReleased) {

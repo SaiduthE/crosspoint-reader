@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -14,13 +15,19 @@ class DNSServer;
 // The access point is open by default, as upstream's hotspot is. A page that
 // carries a secret -- Wi-Fi setup carries the home password -- asks for WPA2
 // with a passphrase generated per session; the QR carries it, so a scanned
-// join costs nothing and only the typed fallback sees it.
+// join costs nothing and only the typed fallback sees it. A feature the phone
+// should rejoin by itself (text entry) passes a fixed, remembered passphrase.
 class PhonePortal {
  public:
+  static constexpr size_t PASSPHRASE_LENGTH = 8;
+
   struct Config {
     const char* ssid = "eMinimal";
     // WPA2 with a fresh 8-character passphrase per begin(); otherwise open.
     bool randomPassphrase = false;
+    // WPA2 with this passphrase (8..63 characters) when non-empty; takes
+    // precedence over randomPassphrase.
+    const char* passphrase = nullptr;
     // 1..13. Raising the AP on the channel a station join will land on keeps
     // the phone attached through the join; an AP+STA radio has one channel.
     uint8_t channel = 1;
@@ -48,6 +55,8 @@ class PhonePortal {
   const std::string& ssid() const { return ssidStr; }
   // Empty for an open network.
   const std::string& passphrase() const { return passphraseStr; }
+  // PASSPHRASE_LENGTH characters from an alphabet without 0/O, 1/l/I.
+  static std::string generatePassphrase();
   const std::string& ip() const { return ipStr; }
   int stationCount() const;
 

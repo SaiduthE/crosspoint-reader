@@ -10,6 +10,7 @@
 #include "components/UITheme.h"
 #include "components/UiSliderDialog.h"
 #include "fontIds.h"
+#include "util/FiveButtonInput.h"
 
 namespace fui = freeink::ui;
 
@@ -134,6 +135,16 @@ void EpubReaderPercentSelectionActivity::loop() {
     return;
   }
 
+  // No front Left/Right on this board: Up/Down step the percent directly,
+  // release for a single step and a hold for the large step.
+  if (five_button::active()) {
+    buttonNavigator.onRelease({MappedInputManager::Button::Up}, [this] { adjustPercent(kSmallStep); });
+    buttonNavigator.onRelease({MappedInputManager::Button::Down}, [this] { adjustPercent(-kSmallStep); });
+    buttonNavigator.onContinuous({MappedInputManager::Button::Up}, [this] { adjustPercent(kLargeStep); });
+    buttonNavigator.onContinuous({MappedInputManager::Button::Down}, [this] { adjustPercent(-kLargeStep); });
+    return;
+  }
+
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] { adjustPercent(-kSmallStep); });
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] { adjustPercent(kSmallStep); });
 
@@ -154,10 +165,13 @@ void EpubReaderPercentSelectionActivity::percentScreen(UiScreen& screen, void* u
 void EpubReaderPercentSelectionActivity::buildPercentScreen(UiScreen& screen) {
   char readout[16];
   snprintf(readout, sizeof(readout), "%d%%", percent);
+  const bool fiveButton = five_button::active();
   char hint1[64];
-  snprintf(hint1, sizeof(hint1), "%s %d%%", I18N.get(StrId::STR_STEP_HINT_FRONT), kSmallStep);
+  snprintf(hint1, sizeof(hint1), "%s %d%%",
+           I18N.get(fiveButton ? StrId::STR_STEP_HINT_PRESS : StrId::STR_STEP_HINT_FRONT), kSmallStep);
   char hint2[64];
-  snprintf(hint2, sizeof(hint2), "%s %d%%", I18N.get(StrId::STR_STEP_HINT_SIDE), kLargeStep);
+  snprintf(hint2, sizeof(hint2), "%s %d%%",
+           I18N.get(fiveButton ? StrId::STR_STEP_HINT_HOLD : StrId::STR_STEP_HINT_SIDE), kLargeStep);
 
   UiSliderDialogSpec spec;
   spec.title = tr(STR_GO_TO_PERCENT);
@@ -181,8 +195,11 @@ void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
   // slider, -/+ zones, and Cancel/OK register touch hit rects.
   renderUi();
 
-  // Button hints follow the current front button layout.
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
+  // Button hints follow the current front button layout; on the five-button
+  // board Up/Down step directly, so the Up slot reads "+" and Down reads "-".
+  const bool fiveButton = five_button::active();
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), fiveButton ? "+" : "-", fiveButton ? "-" : "+");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

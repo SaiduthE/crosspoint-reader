@@ -14,6 +14,7 @@
 #include "ReaderFontSizes.h"
 #include "SettingsList.h"
 #include "fontIds.h"
+#include "util/FiveButtonInput.h"
 
 namespace {
 
@@ -43,6 +44,23 @@ void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings
       }
     }
   }
+}
+
+bool CrossPointSettings::validateButtonMap(CrossPointSettings& settings) {
+  // Four values holding each of the four keys exactly once are a permutation.
+  static constexpr uint8_t KEYS[] = {FIVE_HW_BACK, FIVE_HW_CONFIRM, FIVE_HW_UP, FIVE_HW_DOWN};
+  const uint8_t mapped[] = {settings.buttonMapBack, settings.buttonMapConfirm, settings.buttonMapUp,
+                            settings.buttonMapDown};
+  if (std::all_of(std::begin(KEYS), std::end(KEYS), [&mapped](const uint8_t key) {
+        return std::count(std::begin(mapped), std::end(mapped), key) == 1;
+      })) {
+    return false;
+  }
+  settings.buttonMapBack = FIVE_HW_BACK;
+  settings.buttonMapConfirm = FIVE_HW_CONFIRM;
+  settings.buttonMapUp = FIVE_HW_UP;
+  settings.buttonMapDown = FIVE_HW_DOWN;
+  return true;
 }
 
 uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue) {
@@ -88,6 +106,11 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["frontButtonConfirm"] = frontButtonConfirm;
   doc["frontButtonLeft"] = frontButtonLeft;
   doc["frontButtonRight"] = frontButtonRight;
+  // Five-button key map — managed by the same sub-activity, not in SettingsList.
+  doc["buttonMapBack"] = buttonMapBack;
+  doc["buttonMapConfirm"] = buttonMapConfirm;
+  doc["buttonMapUp"] = buttonMapUp;
+  doc["buttonMapDown"] = buttonMapDown;
   // Font family and size — both use dynamic getter/setters in SettingsList (the
   // option lists depend on the SD font registry), so the generic loop skips them.
   doc["fontFamily"] = fontFamily;
@@ -99,6 +122,10 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, save manually
   if (dictionaryName[0] != '\0') {
     doc["dictionaryName"] = dictionaryName;
+  }
+  // Phone text-entry passphrase — not in SettingsList, save manually.
+  if (phoneTextPassphrase[0] != '\0') {
+    doc["phoneTextPassphrase"] = phoneTextPassphrase;
   }
 
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
@@ -209,6 +236,23 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
       clamp(doc["frontButtonRight"] | (uint8_t)FRONT_HW_RIGHT, FRONT_BUTTON_HARDWARE_COUNT, FRONT_HW_RIGHT);
   validateFrontButtonMapping(s);
 
+  // Five-button boards remap through buttonMap* below; a front-button mapping
+  // stored earlier would strand Back/Confirm, so force it back to hardware.
+  if (five_button::active() && (frontButtonBack != FRONT_HW_BACK || frontButtonConfirm != FRONT_HW_CONFIRM ||
+                                frontButtonLeft != FRONT_HW_LEFT || frontButtonRight != FRONT_HW_RIGHT)) {
+    frontButtonBack = FRONT_HW_BACK;
+    frontButtonConfirm = FRONT_HW_CONFIRM;
+    frontButtonLeft = FRONT_HW_LEFT;
+    frontButtonRight = FRONT_HW_RIGHT;
+    needsResave = true;
+  }
+  // Five-button key map — managed by the same sub-activity, not in SettingsList.
+  buttonMapBack = doc["buttonMapBack"] | FIVE_HW_BACK;
+  buttonMapConfirm = doc["buttonMapConfirm"] | FIVE_HW_CONFIRM;
+  buttonMapUp = doc["buttonMapUp"] | FIVE_HW_UP;
+  buttonMapDown = doc["buttonMapDown"] | FIVE_HW_DOWN;
+  if (validateButtonMap(s)) needsResave = true;
+
   // Reader font size — an actual point size since 1.5. Files written by 1.4 and
   // earlier hold the old SMALL/MEDIUM/LARGE/EXTRA_LARGE slot in 0..3; no font is
   // renderable at those sizes, so the range is unambiguous and folds to the
@@ -229,6 +273,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
     fontFamily = NOTOSERIF;
     needsResave = true;
   }
+  // One UI theme on this device: SettingsList.h drops the UI Theme row, so no
+  // other value may come back from an older file.
+  uiTheme = EMINIMAL;
 #endif
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
@@ -255,6 +302,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   }
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, load manually
   copyToField(dictionaryName, doc["dictionaryName"] | "", sizeof(dictionaryName));
+
+  // Phone text-entry passphrase — not in SettingsList, load manually.
+  copyToField(phoneTextPassphrase, doc["phoneTextPassphrase"] | "", sizeof(phoneTextPassphrase));
 
   // Language -- stored as code string for stability across enum reorders.
   if (doc["language"].is<const char*>()) {

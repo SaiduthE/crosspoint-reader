@@ -8,7 +8,6 @@
 
 namespace {
 constexpr uint16_t DNS_PORT = 53;
-constexpr size_t PASSPHRASE_LENGTH = 8;
 
 // Escapes the characters the WIFI: QR grammar reserves (\ ; , " :).
 std::string qrEscape(const std::string& in) {
@@ -20,10 +19,11 @@ std::string qrEscape(const std::string& in) {
   }
   return out;
 }
+}  // namespace
 
-// Eight characters from an alphabet without 0/O, 1/l/I: this is the string
-// someone types from the panel when their camera does not read the QR.
-std::string randomPassphrase() {
+// No 0/O, 1/l/I: this is the string someone types from the panel when their
+// camera does not read the QR.
+std::string PhonePortal::generatePassphrase() {
   static constexpr char ALPHABET[] = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
   constexpr uint32_t ALPHABET_SIZE = sizeof(ALPHABET) - 1;
   std::string out;
@@ -33,7 +33,6 @@ std::string randomPassphrase() {
   }
   return out;
 }
-}  // namespace
 
 PhonePortal::~PhonePortal() { end(); }
 
@@ -42,7 +41,11 @@ bool PhonePortal::begin(const Config& config) {
 
   ssidStr = config.ssid ? config.ssid : "";
   hostnameStr = config.hostname ? config.hostname : "";
-  passphraseStr = config.randomPassphrase ? randomPassphrase() : std::string();
+  if (config.passphrase && config.passphrase[0] != '\0') {
+    passphraseStr = config.passphrase;
+  } else {
+    passphraseStr = config.randomPassphrase ? generatePassphrase() : std::string();
+  }
   ipStr.clear();
 
   LOG_DBG("PORTAL", "Raising %s on channel %u (%s, %s), free heap %d bytes", ssidStr.c_str(), config.channel,

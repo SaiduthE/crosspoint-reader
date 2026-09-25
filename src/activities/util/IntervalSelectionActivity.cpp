@@ -11,6 +11,7 @@
 #include "components/UITheme.h"
 #include "components/UiSliderDialog.h"
 #include "fontIds.h"
+#include "util/FiveButtonInput.h"
 
 namespace fui = freeink::ui;
 
@@ -131,6 +132,16 @@ void IntervalSelectionActivity::loop() {
     return;
   }
 
+  // No front Left/Right on this board: Up/Down step the value directly,
+  // release for a single step and a hold for the large step.
+  if (five_button::active()) {
+    buttonNavigator.onRelease({MappedInputManager::Button::Up}, [this] { adjustValue(smallStep); });
+    buttonNavigator.onRelease({MappedInputManager::Button::Down}, [this] { adjustValue(-smallStep); });
+    buttonNavigator.onContinuous({MappedInputManager::Button::Up}, [this] { adjustValue(largeStep); });
+    buttonNavigator.onContinuous({MappedInputManager::Button::Down}, [this] { adjustValue(-largeStep); });
+    return;
+  }
+
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] { adjustValue(-smallStep); });
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] { adjustValue(smallStep); });
 
@@ -162,14 +173,17 @@ void IntervalSelectionActivity::buildIntervalScreen(UiScreen& screen) {
   char readout[64];
   formatValue(readout, sizeof(readout), value);
 
-  // Step hints: front buttons do the small step, side buttons the large step. Built from
-  // separate label + value strings (rather than splitting one localized sentence) so the layout
-  // doesn't depend on translators preserving a hidden separator.
+  // Step hints: front buttons do the small step, side buttons the large step
+  // (Up/Down press/hold on the five-button board, which has no front Left/Right).
+  // Built from separate label + value strings (rather than splitting one localized
+  // sentence) so the layout doesn't depend on translators preserving a hidden separator.
+  const bool fiveButton = five_button::active();
   char hints[2][64];
   char stepText[24];
   int hintIndex = 0;
   for (const auto& [labelId, step] :
-       {std::pair{StrId::STR_STEP_HINT_FRONT, smallStep}, std::pair{StrId::STR_STEP_HINT_SIDE, largeStep}}) {
+       {std::pair{fiveButton ? StrId::STR_STEP_HINT_PRESS : StrId::STR_STEP_HINT_FRONT, smallStep},
+        std::pair{fiveButton ? StrId::STR_STEP_HINT_HOLD : StrId::STR_STEP_HINT_SIDE, largeStep}}) {
     if (valueFormatId != StrId::STR_NONE_OPT) {
       snprintf(stepText, sizeof(stepText), I18N.get(valueFormatId), static_cast<unsigned int>(step));
     } else {
@@ -206,7 +220,11 @@ void IntervalSelectionActivity::render(RenderLock&&) {
   // interactive elements register touch hit rects.
   renderUi();
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
+  // On the five-button board Up/Down step directly, so the Up slot reads "+"
+  // and Down reads "-".
+  const bool fiveButton = five_button::active();
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), fiveButton ? "+" : "-", fiveButton ? "-" : "+");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

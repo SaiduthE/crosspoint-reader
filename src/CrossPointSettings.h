@@ -104,6 +104,13 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     FRONT_BUTTON_HARDWARE_COUNT
   };
 
+  // Five-button boards' four front keys as HalGPIO::BTN_* indices (asserted in
+  // MappedInputManager.cpp): Back, Select, Up, Down.
+  static constexpr uint8_t FIVE_HW_BACK = 0;
+  static constexpr uint8_t FIVE_HW_CONFIRM = 1;
+  static constexpr uint8_t FIVE_HW_UP = 4;
+  static constexpr uint8_t FIVE_HW_DOWN = 5;
+
   // Side button layout options
   // Default: Up = Previous, Down = Next. NEXT_NEXT / PREV_PREV assign both
   // buttons to the same direction for one-handed reading.
@@ -207,6 +214,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // painted over the page.
   enum READER_MENU_STYLE { READER_MENU_LIST = 0, READER_MENU_TOOLBAR = 1, READER_MENU_STYLE_COUNT };
 
+  // Where text entry happens: chosen once per field (Ask), or remembered.
+  enum TEXT_ENTRY_METHOD { TEXT_ENTRY_ASK = 0, TEXT_ENTRY_DEVICE = 1, TEXT_ENTRY_PHONE = 2 };
+
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
 
   enum TOUCH_READER_CONTROLS { TOUCH_READER_OFF = 0, TOUCH_READER_ON = 1, TOUCH_READER_CONTROLS_COUNT };
@@ -299,6 +309,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t frontButtonConfirm = FRONT_HW_CONFIRM;
   uint8_t frontButtonLeft = FRONT_HW_LEFT;
   uint8_t frontButtonRight = FRONT_HW_RIGHT;
+  // Five-button key map (logical -> hardware), set by the remap wizard on
+  // five-button boards; always a permutation of the FIVE_HW_* keys.
+  uint8_t buttonMapBack = FIVE_HW_BACK;
+  uint8_t buttonMapConfirm = FIVE_HW_CONFIRM;
+  uint8_t buttonMapUp = FIVE_HW_UP;
+  uint8_t buttonMapDown = FIVE_HW_DOWN;
   // Reader font settings
   uint8_t fontFamily = NOTOSERIF;
   // Point size of the reader font. Only sizes the active family actually ships
@@ -353,6 +369,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   char sdFontFamilyName[32] = "";
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
+  // Phone text-entry hotspot passphrase, generated once so Android remembers
+  // the network. Not in SettingsList.h: never shown in Settings or /api/settings.
+  char phoneTextPassphrase[9] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
   // Show the title and author read from inside each book rather than its
@@ -393,6 +412,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // books someone reads is not necessarily the language of their UI.
   // See keyboard_layouts:: for the bit assignment and the defaulting rules.
   uint16_t keyboardLayouts = 0;
+  // TEXT_ENTRY_METHOD: device keyboard, phone, or ask each time. Five-button
+  // boards only (see SettingsList.h); read through getSettingsList()'s generic
+  // loop, so no manual JSON code below.
+  uint8_t textEntryMethod = TEXT_ENTRY_ASK;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
 
@@ -461,6 +484,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   bool fromJson(JsonVariantConst doc);
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
+  // Resets the five-button key map to defaults unless it is a permutation of
+  // the FIVE_HW_* keys; true when it had to.
+  static bool validateButtonMap(CrossPointSettings& settings);
   static uint8_t sleepTimeoutEnumToMinutes(uint8_t legacyValue);
 
   float getReaderLineCompression() const;

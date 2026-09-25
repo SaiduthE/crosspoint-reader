@@ -25,9 +25,14 @@ class ButtonRemapActivity final : public Activity, private UiAppHost {
   unsigned long errorUntil = 0;
   std::string errorMessage;
   freeink::ui::ListItem rowItems[4]{};
+  // Five-button boards: key pressed inside this screen, assigned on its release.
+  int8_t armedButton = -1;
 
   static void screenTrampoline(UiScreen& screen, void* user);
   void buildScreen(UiScreen& screen);
+  // Five-button boards: every front key is a role, so escapes are holds.
+  void loopFiveButton();
+  const char* fiveButtonPrompt() const;
   // Commit temporary mapping to settings.
   void applyTempMapping();
   // Returns false if a hardware button is already assigned to a different role.

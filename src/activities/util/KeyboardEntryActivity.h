@@ -42,6 +42,17 @@ class KeyboardEntryActivity : public Activity {
 
   ButtonNavigator buttonNavigator;
 
+  // Five-button boards (no touch, no Left/Right): Up/Down walk every key of
+  // the layer in reading order, wrapping at both ends; Select types the key,
+  // a Select hold submits, Back deletes (cancels when empty), a Back hold
+  // cancels. Append-only: the cursor stays at the end.
+  static constexpr uint16_t KEY_REPEAT_START_MS = 400;
+  static constexpr uint16_t KEY_REPEAT_MS = 110;
+  static constexpr unsigned long SUBMIT_HOLD_MS = 800;
+  static constexpr unsigned long CANCEL_HOLD_MS = 800;
+  bool linearNav = false;
+  ButtonNavigator keyRepeat{KEY_REPEAT_MS, KEY_REPEAT_START_MS};
+
   // Keyboard layers. The letter/symbol layers come from the SDK's builtin
   // layouts (with the always-visible number row); the URL layers are
   // app-defined tables in the .cpp.
@@ -123,6 +134,9 @@ class KeyboardEntryActivity : public Activity {
   void clampSelection();
   void moveSelectionRow(int delta);
   void moveSelectionCol(int delta);
+  // Linear walk: one key forward/back in row-major order across the layer.
+  void stepKey(int delta);
+  void loopLinear();
   bool syncSelectionToValue(int16_t value);
   // Handles one key activation (by stable key id). Returns true when the
   // screen needs a repaint; OK/cancel finish the activity instead.

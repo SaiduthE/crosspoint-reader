@@ -8,6 +8,7 @@
 #include <I18n.h>
 #include <LibraryBuilder.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <OpdsStream.h>
 #include <WiFi.h>
 
@@ -15,13 +16,14 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
-#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/TextEntryActivity.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/icons/search32.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "util/BookCacheUtils.h"
+#include "util/FiveButtonInput.h"
 #include "util/OpdsFilename.h"
 #include "util/StringUtils.h"
 #include "util/UrlUtils.h"
@@ -34,6 +36,8 @@ constexpr fui::ActionId ACTION_SEARCH = 2;
 constexpr fui::ActionId ACTION_CANCEL = 3;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 5000;
+// Five-button boards have no Left for search: a Select hold opens it.
+constexpr unsigned long SEARCH_HOLD_MS = 1000;
 
 }  // namespace
 
@@ -143,6 +147,12 @@ void OpdsBookBrowserActivity::loop() {
   if (state == BrowserState::DOWNLOADING) return;
 
   if (state == BrowserState::BROWSING) {
+    // Polled before the Confirm release below: a fired hold swallows it.
+    if (five_button::active() && !searchTemplate.empty() &&
+        mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, SEARCH_HOLD_MS)) {
+      launchSearch();
+      return;
+    }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       activateSelected();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -337,7 +347,9 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     case BrowserState::BROWSING: {
       const char* confirmLabel =
           (!entries.empty() && entries[selectorIndex].type == OpdsEntryType::BOOK) ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
-      const char* searchLabel = (!searchTemplate.empty() && selectorIndex == 0) ? tr(STR_SEARCH) : tr(STR_DIR_UP);
+      // Five-button boards search with a Select hold; that slot is plain Up there.
+      const bool searchOnLeft = !five_button::active() && !searchTemplate.empty() && selectorIndex == 0;
+      const char* searchLabel = searchOnLeft ? tr(STR_SEARCH) : tr(STR_DIR_UP);
       labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, searchLabel, tr(STR_DIR_DOWN));
       break;
     }
@@ -582,7 +594,11 @@ void OpdsBookBrowserActivity::launchSearch() {
   state = BrowserState::SEARCH_INPUT;
   requestUpdate();
 
-  auto keyboard = std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH));
+  auto keyboard = makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_SEARCH));
+  if (!keyboard) {
+    LOG_ERR("OPDS", "OOM: TextEntryActivity");
+    return;
+  }
   startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
     state = BrowserState::BROWSING;
     if (!result.isCancelled) {

@@ -19,6 +19,7 @@
 #include "activities/settings/SettingsActivity.h"
 #include "components/UITheme.h"
 #include "util/DictionaryRegistry.h"
+#include "util/FiveButtonInput.h"
 
 // Build the font family setting dynamically. When registry is non-null, SD card fonts
 // are appended after the built-in fonts. Otherwise only built-in fonts are listed.
@@ -187,10 +188,21 @@ inline std::vector<StrId> buildLongPressMenuValues() {
   return {VALUES, VALUES + count};
 }
 
+// Side button layout options. Five-button boards turn pages with the front
+// Up/Down keys and have none to spare for Disabled/Next-Next/Prev-Prev, so they
+// get the first two values (same indices) under their own wording; a value
+// stored past them clamps back to the default through fromJson()'s generic
+// enum-range clamp.
+inline std::vector<StrId> sideButtonLayoutValues() {
+  if (five_button::active()) return {StrId::STR_PAGE_TURN_UP_BACK, StrId::STR_PAGE_TURN_DOWN_BACK};
+  return {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV, StrId::STR_DISABLED, StrId::STR_NEXT_NEXT,
+          StrId::STR_PREV_PREV};
+}
+
 inline std::vector<StrId> homeThemeValues() {
 #if FREEINK_DEVICE_EMINIMAL
-  // e-Minimal's own theme, listed on this device only. The board has PSRAM,
-  // so Cover Grid before it is always offered and the indices stay aligned.
+  // e-Minimal's own theme, defined on this device only (whose UI Theme row is
+  // erased below). The board has PSRAM, so the indices stay aligned.
   static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC,     StrId::STR_THEME_LYRA,
                                      StrId::STR_THEME_LYRA_EXTENDED, StrId::STR_THEME_ROUNDEDRAFF,
                                      StrId::STR_THEME_COVER_GRID,  StrId::STR_THEME_EMINIMAL};
@@ -328,10 +340,9 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           {StrId::STR_MENU_STYLE_LIST, StrId::STR_MENU_STYLE_TOOLBAR}, "readerMenuStyle",
                           StrId::STR_CAT_READER),
         // --- Controls ---
-        SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
-                          {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV, StrId::STR_DISABLED, StrId::STR_NEXT_NEXT,
-                           StrId::STR_PREV_PREV},
-                          "sideButtonLayout", StrId::STR_CAT_CONTROLS),
+        SettingInfo::Enum(five_button::active() ? StrId::STR_PAGE_TURN_BUTTONS : StrId::STR_SIDE_BTN_LAYOUT,
+                          &CrossPointSettings::sideButtonLayout, sideButtonLayoutValues(), "sideButtonLayout",
+                          StrId::STR_CAT_CONTROLS),
         SettingInfo::Toggle(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
                             "touchReaderControls", StrId::STR_CAT_CONTROLS),
         SettingInfo::Enum(StrId::STR_NEXT_PAGE_GESTURE, &CrossPointSettings::pageTurnGesture,
@@ -377,6 +388,10 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                             "pwrBtnFootnoteBack", StrId::STR_CAT_CONTROLS),
         SettingInfo::Toggle(StrId::STR_BACK_SHORT_TO_FILE_BROWSER, &CrossPointSettings::backShortToFileBrowser,
                             "backShortToFileBrowser", StrId::STR_CAT_CONTROLS),
+        // Five-button boards only; erased below on every other board.
+        SettingInfo::Enum(StrId::STR_TEXT_ENTRY, &CrossPointSettings::textEntryMethod,
+                          {StrId::STR_ASK_EVERY_TIME, StrId::STR_TEXT_ENTRY_DEVICE, StrId::STR_TEXT_ENTRY_PHONE},
+                          "textEntryMethod", StrId::STR_CAT_CONTROLS),
 
         // --- System ---
         SettingInfo::Value(
@@ -509,13 +524,26 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     if (!BoardConfig::isX4Pro()) eraseEntry(StrId::STR_DBL_CLICK_PWR_LIGHT);
     // Tilt page turn needs the QMI8658 IMU (X3).
     if (!halTiltSensor.isAvailable()) eraseEntry(StrId::STR_TILT_PAGE_TURN);
+    // The toolbar reader-menu style needs Left/Right, which five-button boards
+    // don't have; the text-entry chooser exists only there — every other board
+    // always uses the device keyboard.
+    if (five_button::active()) {
+      eraseEntry(StrId::STR_READER_MENU_STYLE);
+    } else {
+      eraseEntry(StrId::STR_TEXT_ENTRY);
+    }
+#if FREEINK_DEVICE_EMINIMAL
+    // e-Minimal ships its own theme only; fromJson() pins uiTheme to it.
+    eraseEntry(StrId::STR_UI_THEME);
+#endif
     return v;
   }();
 
   std::vector<SettingInfo> v = baseList;
   if (!BoardConfig::hasTouch()) {
-    // The reader menu style stays available on button boards (the toolbar
-    // chrome is button-navigable); only the touch controls are hidden.
+    // The reader menu style stays available on four-button boards, whose Left/
+    // Right can drive the toolbar chrome; five-button boards already erased it
+    // above. Only the touch controls are hidden here.
     v.erase(std::remove_if(v.begin(), v.end(),
                            [](const SettingInfo& s) {
                              return s.nameId == StrId::STR_TOUCH_READER_CONTROLS ||

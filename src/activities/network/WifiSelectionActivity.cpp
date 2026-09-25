@@ -1,6 +1,5 @@
 #include "WifiSelectionActivity.h"
 
-#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -18,6 +17,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/WifiPhoneSetup.h"
+#include "util/FiveButtonInput.h"
 
 namespace fui = freeink::ui;
 
@@ -289,6 +289,16 @@ void WifiSelectionActivity::appendHiddenNetworkEntry() {
   placeholder.hasSavedPassword = false;
   placeholder.isHiddenPlaceholder = true;
   networks.push_back(std::move(placeholder));
+
+  // No front Left/Right to rescan with on this board: give it a row instead.
+  if (phoneEntersText()) {
+    WifiNetworkInfo rescan;
+    rescan.rssi = 0;
+    rescan.isEncrypted = false;
+    rescan.hasSavedPassword = false;
+    rescan.isRescanPlaceholder = true;
+    networks.push_back(std::move(rescan));
+  }
 }
 
 // Derives networkStatuses/networkRowItems from `networks`. Called whenever
@@ -301,12 +311,14 @@ void WifiSelectionActivity::rebuildNetworkRowItems() {
   networkRowItems.reserve(networks.size());
   for (size_t i = 0; i < networks.size(); i++) {
     const auto& network = networks[i];
-    if (!network.isHiddenPlaceholder) {
+    if (!network.isHiddenPlaceholder && !network.isRescanPlaceholder) {
       networkStatuses[i] = std::string(network.hasSavedPassword ? "+ " : "") + (network.isEncrypted ? "* " : "") +
                            getSignalStrengthIndicator(network.rssi);
     }
     fui::ListItem item;
-    item.label = network.isHiddenPlaceholder ? tr(STR_ADD_HIDDEN_NETWORK) : network.ssid.c_str();
+    item.label = network.isHiddenPlaceholder  ? tr(STR_ADD_HIDDEN_NETWORK)
+                : network.isRescanPlaceholder ? tr(STR_RESCAN_NETWORKS)
+                                              : network.ssid.c_str();
     if (!networkStatuses[i].empty()) item.value = networkStatuses[i].c_str();
     item.actionValue = static_cast<int16_t>(i);
     networkRowItems.push_back(item);
@@ -319,6 +331,12 @@ void WifiSelectionActivity::selectNetwork(const int index) {
   }
 
   const auto& network = networks[index];
+
+  // Synthetic "Scan again" entry (no front Left/Right to rescan with directly).
+  if (network.isRescanPlaceholder) {
+    startWifiScan();
+    return;
+  }
 
   // Synthetic "Add hidden network..." entry: prompt the user to type the SSID first
   if (network.isHiddenPlaceholder) {
@@ -913,9 +931,12 @@ void WifiSelectionActivity::render(RenderLock&&) {
     case WifiSelectionState::FORGET_PROMPT: {
       // The app's screen builder draws the option dialog panel itself.
       renderUi();
-      const auto labels =
-          mappedInput.mapLabels(state == WifiSelectionState::SAVE_PROMPT ? tr(STR_CANCEL) : tr(STR_BACK),
-                                tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+      // No front Left/Right on this board: the same Up/Down that moves the
+      // option (loop()) is hinted instead.
+      const bool fiveButton = phoneEntersText();
+      const auto labels = mappedInput.mapLabels(
+          state == WifiSelectionState::SAVE_PROMPT ? tr(STR_CANCEL) : tr(STR_BACK), tr(STR_SELECT),
+          fiveButton ? tr(STR_DIR_UP) : tr(STR_DIR_LEFT), fiveButton ? tr(STR_DIR_DOWN) : tr(STR_DIR_RIGHT));
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       break;
     }
@@ -1140,18 +1161,14 @@ void WifiSelectionActivity::renderConnectionFailed(const Rect* screen, const The
 // Four plain buttons and no touch: nothing on the panel can drive the
 // on-screen keyboard, so text comes from a phone (vault 04 §11). Boards with
 // Left/Right, a ladder or touch keep upstream's keyboard.
-bool WifiSelectionActivity::phoneEntersText() const {
-  const auto& profile = BoardConfig::ACTIVE;
-  if (mappedInput.hasTouch()) return false;
-  if (profile.inputStyle != BoardConfig::InputStyle::DigitalButtons) return false;
-  return profile.input.left == BoardConfig::PIN_UNASSIGNED || profile.input.right == BoardConfig::PIN_UNASSIGNED;
-}
+bool WifiSelectionActivity::phoneEntersText() const { return five_button::active(); }
 
 void WifiSelectionActivity::startPhoneSetup() {
   std::vector<WifiPhoneSetup::Target> visible;
   visible.reserve(realNetworkCount);
   for (const auto& network : networks) {
-    if (!network.isHiddenPlaceholder) visible.push_back({network.ssid, network.channel});
+    if (network.isHiddenPlaceholder || network.isRescanPlaceholder) continue;
+    visible.push_back({network.ssid, network.channel});
   }
 
   phoneSetup = std::make_unique<WifiPhoneSetup>(selectedSSID, std::move(visible));

@@ -5,6 +5,7 @@
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "util/FiveButtonInput.h"
 
 namespace fui = freeink::ui;
 
@@ -90,7 +91,13 @@ void EpubReaderFootnotesActivity::drawChrome() {
 }
 
 void EpubReaderFootnotesActivity::drawFooter() {
-  const auto labels = footnotes.empty() ? mappedInput.mapLabels(tr(STR_BACK), "", "", "")
-                                        : mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "", "");
+  // No front Left/Right on this board: the last two slots hint the Up/Down
+  // that already move the list selection.
+  const bool fiveButtonHint = !footnotes.empty() && five_button::active();
+  const auto labels =
+      footnotes.empty()
+          ? mappedInput.mapLabels(tr(STR_BACK), "", "", "")
+          : fiveButtonHint ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                          : mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }

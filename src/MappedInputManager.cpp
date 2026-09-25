@@ -10,8 +10,15 @@
 
 #include "CrossPointSettings.h"
 #include "components/UITheme.h"
+#include "util/FiveButtonInput.h"
 
 namespace fui = freeink::ui;
+
+// The five-button key map stores HalGPIO::BTN_* indices.
+static_assert(CrossPointSettings::FIVE_HW_BACK == HalGPIO::BTN_BACK);
+static_assert(CrossPointSettings::FIVE_HW_CONFIRM == HalGPIO::BTN_CONFIRM);
+static_assert(CrossPointSettings::FIVE_HW_UP == HalGPIO::BTN_UP);
+static_assert(CrossPointSettings::FIVE_HW_DOWN == HalGPIO::BTN_DOWN);
 
 void MappedInputManager::update(const bool deferHomeButtonAction) const {
   gpio.update();
@@ -73,59 +80,78 @@ MappedInputManager::Button MappedInputManager::mapScreenDirection(const Button b
       return button;
   }
 
-  const uint8_t orientation =
-      SETTINGS.frontButtonFollowOrientation ? static_cast<uint8_t>(renderer.getOrientation()) : 0;
+  // Five-button boards turn Up/Down in upDownKey() instead; rotating here as
+  // well would flip them twice.
+  const uint8_t orientation = SETTINGS.frontButtonFollowOrientation && !five_button::active()
+                                  ? static_cast<uint8_t>(renderer.getOrientation())
+                                  : 0;
   return directions[orientation][direction];
+}
+
+uint8_t MappedInputManager::upDownKey(const bool up) const {
+  if (!five_button::active()) return up ? HalGPIO::BTN_UP : HalGPIO::BTN_DOWN;
+  // The four front keys sit in one row under the portrait screen, Up left of
+  // Down. With Orient Front Buttons on, the row turns with the device:
+  //   Portrait                   row below                 as mapped
+  //   LandscapeClockwise         row on the left edge      Up key above Down: as mapped
+  //   PortraitInverted           row above, order flipped  swapped
+  //   LandscapeCounterClockwise  row on the right edge     Down key above Up: swapped
+  // That is exactly isNavDirectionSwapped(), which flips mapLabels() to match.
+  return up != isNavDirectionSwapped() ? SETTINGS.buttonMapUp : SETTINGS.buttonMapDown;
 }
 
 bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint8_t) const) const {
   const auto sideLayout = SETTINGS.sideButtonLayout;
+  const bool fiveButton = five_button::active();
+  const uint8_t upKey = upDownKey(true);
+  const uint8_t downKey = upDownKey(false);
+  // Five-button boards already turned Up/Down in upDownKey(); the page and nav
+  // cases below must not flip them a second time.
+  const bool navSwapped = !fiveButton && isNavDirectionSwapped();
 
   switch (button) {
     case Button::Back:
-      // Logical Back maps to user-configured front button.
-      return (gpio.*fn)(SETTINGS.frontButtonBack);
+      // Logical Back maps to the user-configured key.
+      return (gpio.*fn)(fiveButton ? SETTINGS.buttonMapBack : SETTINGS.frontButtonBack);
     case Button::Confirm:
-      // Logical Confirm maps to user-configured front button.
-      return (gpio.*fn)(SETTINGS.frontButtonConfirm);
+      // Logical Confirm maps to the user-configured key.
+      return (gpio.*fn)(fiveButton ? SETTINGS.buttonMapConfirm : SETTINGS.frontButtonConfirm);
     case Button::Left:
-      // Logical Left maps to user-configured front button.
+      // Logical Left maps to user-configured front button (unassigned on five-button boards).
       return (gpio.*fn)(SETTINGS.frontButtonLeft);
     case Button::Right:
-      // Logical Right maps to user-configured front button.
+      // Logical Right maps to user-configured front button (unassigned on five-button boards).
       return (gpio.*fn)(SETTINGS.frontButtonRight);
     case Button::Up:
-      // Side buttons remain fixed for Up/Down.
-      return (gpio.*fn)(HalGPIO::BTN_UP);
+      return (gpio.*fn)(upKey);
     case Button::Down:
-      // Side buttons remain fixed for Up/Down.
-      return (gpio.*fn)(HalGPIO::BTN_DOWN);
+      return (gpio.*fn)(downKey);
     case Button::Power:
       // Power button bypasses remapping.
       return (gpio.*fn)(HalGPIO::BTN_POWER);
     case Button::PageBack:
-      // Reader page navigation uses side buttons and can be swapped via settings.
+      // Reader page navigation rides on Up/Down and can be swapped via settings.
       switch (sideLayout) {
         case CrossPointSettings::PREV_NEXT:
-          return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP);
+          return (gpio.*fn)(navSwapped ? downKey : upKey);
         case CrossPointSettings::NEXT_PREV:
-          return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_UP : HalGPIO::BTN_DOWN);
+          return (gpio.*fn)(navSwapped ? upKey : downKey);
         case CrossPointSettings::PREV_PREV:
-          return (gpio.*fn)(HalGPIO::BTN_UP) || (gpio.*fn)(HalGPIO::BTN_DOWN);
+          return (gpio.*fn)(upKey) || (gpio.*fn)(downKey);
         case CrossPointSettings::NEXT_NEXT:
         case CrossPointSettings::SIDE_BUTTONS_DISABLED:
         default:
           return false;
       }
     case Button::PageForward:
-      // Reader page navigation uses side buttons and can be swapped via settings.
+      // Reader page navigation rides on Up/Down and can be swapped via settings.
       switch (sideLayout) {
         case CrossPointSettings::PREV_NEXT:
-          return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_UP : HalGPIO::BTN_DOWN);
+          return (gpio.*fn)(navSwapped ? upKey : downKey);
         case CrossPointSettings::NEXT_PREV:
-          return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP);
+          return (gpio.*fn)(navSwapped ? downKey : upKey);
         case CrossPointSettings::NEXT_NEXT:
-          return (gpio.*fn)(HalGPIO::BTN_UP) || (gpio.*fn)(HalGPIO::BTN_DOWN);
+          return (gpio.*fn)(upKey) || (gpio.*fn)(downKey);
         case CrossPointSettings::PREV_PREV:
         case CrossPointSettings::SIDE_BUTTONS_DISABLED:
         default:
@@ -134,12 +160,12 @@ bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint
     case Button::NavNext:
       // Logical "next item" navigation: side Down + front Right, with the control axis flipped in
       // INVERTED / LANDSCAPE_CCW under the live orientation policy, matching the rotated hint labels.
-      return isNavDirectionSwapped() ? (mapButton(Button::Up, fn) || mapButton(Button::Left, fn))
-                                     : (mapButton(Button::Down, fn) || mapButton(Button::Right, fn));
+      return navSwapped ? (mapButton(Button::Up, fn) || mapButton(Button::Left, fn))
+                        : (mapButton(Button::Down, fn) || mapButton(Button::Right, fn));
     case Button::NavPrevious:
       // Logical "previous item" navigation: side Up + front Left, axis-flipped in the same orientations.
-      return isNavDirectionSwapped() ? (mapButton(Button::Down, fn) || mapButton(Button::Right, fn))
-                                     : (mapButton(Button::Up, fn) || mapButton(Button::Left, fn));
+      return navSwapped ? (mapButton(Button::Down, fn) || mapButton(Button::Right, fn))
+                        : (mapButton(Button::Up, fn) || mapButton(Button::Left, fn));
     case Button::ScreenLeft:
     case Button::ScreenRight:
     case Button::ScreenUp:
@@ -413,42 +439,51 @@ MappedInputManager::Labels MappedInputManager::mapDirectionalLabels(const char* 
 
 MappedInputManager::Labels MappedInputManager::mapFrontLabels(const char* back, const char* confirm, const char* left,
                                                               const char* right) const {
-  // Build the label order based on the configured hardware mapping.
+  // Build the label order based on the configured hardware mapping. Five-button
+  // boards have their Up/Down keys in the Left/Right slots, and callers pass
+  // the Up/Down labels as left/right there.
+  const bool fiveButton = five_button::active();
+  const uint8_t backKey = fiveButton ? SETTINGS.buttonMapBack : SETTINGS.frontButtonBack;
+  const uint8_t confirmKey = fiveButton ? SETTINGS.buttonMapConfirm : SETTINGS.frontButtonConfirm;
+  const uint8_t leftKey = fiveButton ? SETTINGS.buttonMapUp : SETTINGS.frontButtonLeft;
+  const uint8_t rightKey = fiveButton ? SETTINGS.buttonMapDown : SETTINGS.frontButtonRight;
   auto labelForHardware = [&](uint8_t hw) -> const char* {
     // Compare against configured logical roles and return the matching label.
-    if (hw == SETTINGS.frontButtonBack) {
+    if (hw == backKey) {
       return back;
     }
-    if (hw == SETTINGS.frontButtonConfirm) {
+    if (hw == confirmKey) {
       return confirm;
     }
-    if (hw == SETTINGS.frontButtonLeft) {
+    if (hw == leftKey) {
       return left;
     }
-    if (hw == SETTINGS.frontButtonRight) {
+    if (hw == rightKey) {
       return right;
     }
     return "";
   };
 
   return {labelForHardware(HalGPIO::BTN_BACK), labelForHardware(HalGPIO::BTN_CONFIRM),
-          labelForHardware(HalGPIO::BTN_LEFT), labelForHardware(HalGPIO::BTN_RIGHT)};
+          labelForHardware(fiveButton ? HalGPIO::BTN_UP : HalGPIO::BTN_LEFT),
+          labelForHardware(fiveButton ? HalGPIO::BTN_DOWN : HalGPIO::BTN_RIGHT)};
 }
 
-int MappedInputManager::getPressedFrontButton() const {
+int MappedInputManager::getPressedFrontButton() const { return scanFrontButtons(&HalGPIO::wasPressed); }
+
+int MappedInputManager::getReleasedFrontButton() const { return scanFrontButtons(&HalGPIO::wasReleased); }
+
+int MappedInputManager::scanFrontButtons(bool (HalGPIO::*fn)(uint8_t) const) const {
   // Scan the raw front buttons in hardware order.
   // This bypasses remapping so the remap activity can capture physical presses.
-  if (gpio.wasPressed(HalGPIO::BTN_BACK)) {
-    return HalGPIO::BTN_BACK;
-  }
-  if (gpio.wasPressed(HalGPIO::BTN_CONFIRM)) {
-    return HalGPIO::BTN_CONFIRM;
-  }
-  if (gpio.wasPressed(HalGPIO::BTN_LEFT)) {
-    return HalGPIO::BTN_LEFT;
-  }
-  if (gpio.wasPressed(HalGPIO::BTN_RIGHT)) {
-    return HalGPIO::BTN_RIGHT;
+  // Five-button boards' Up/Down are front keys in place of Left/Right.
+  const bool fiveButton = five_button::active();
+  const uint8_t keys[] = {HalGPIO::BTN_BACK, HalGPIO::BTN_CONFIRM, fiveButton ? HalGPIO::BTN_UP : HalGPIO::BTN_LEFT,
+                          fiveButton ? HalGPIO::BTN_DOWN : HalGPIO::BTN_RIGHT};
+  for (const uint8_t key : keys) {
+    if ((gpio.*fn)(key)) {
+      return key;
+    }
   }
   return -1;
 }

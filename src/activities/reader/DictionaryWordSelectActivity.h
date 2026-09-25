@@ -59,6 +59,14 @@ class DictionaryWordSelectActivity final : public Activity {
   uint16_t rowCount = 0;
   unsigned long lastHorizontalMoveTime = 0;
 
+  // Five-button board (no front Left/Right): Up/Down double as word step (tap)
+  // and line jump (hold). lineHoldFired marks a hold that already jumped a
+  // line, so the matching release doesn't also step a word.
+  static constexpr unsigned long LINE_HOLD_START_MS = 500;
+  static constexpr unsigned long LINE_HOLD_REPEAT_MS = 350;
+  bool lineHoldFired = false;
+  unsigned long lastLineHoldTime = 0;
+
   Dictionary dict;
   bool dictOpenAttempted = false;
   bool dictOpenOk = false;

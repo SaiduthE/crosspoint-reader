@@ -9,7 +9,7 @@
 
 #include "../../util/BookmarkFile.h"
 #include "MappedInputManager.h"
-#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/TextEntryActivity.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
@@ -157,8 +157,8 @@ void EpubReaderBookmarksActivity::startRename() {
   app.clearTapFlash();
   const int renameIndex = nav.selected;
   auto keyboard =
-      makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), bookmarks[renameIndex].name,
-                                               BookmarkEntry::MAX_NAME_LENGTH, InputType::Text);
+      makeUniqueNoThrow<TextEntryActivity>(renderer, mappedInput, tr(STR_RENAME), bookmarks[renameIndex].name,
+                                           BookmarkEntry::MAX_NAME_LENGTH, InputType::Text);
   if (!keyboard) {
     LOG_ERR("EPB", "OOM: bookmark rename keyboard");
     return;
