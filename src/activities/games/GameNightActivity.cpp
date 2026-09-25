@@ -1,40 +1,26 @@
 #include "GameNightActivity.h"
 
 #include <Arduino.h>
-#include <DNSServer.h>
-#include <ESPmDNS.h>
 #include <FontCacheManager.h>
 #include <I18n.h>
 #include <WiFi.h>
 #include <esp_random.h>
 
-#include <algorithm>
-
 #include "GameBoards.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "components/PhoneJoinPanel.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/QrUtils.h"
+#include "util/FiveButtonInput.h"
 #include "util/TaskWatchdog.h"
 
 namespace {
-constexpr const char* AP_SSID = "CrossPoint-Games";
-constexpr const char* AP_HOSTNAME = "crosspoint";
+constexpr const char* AP_SSID = "eMinimal Games";
+constexpr const char* AP_HOSTNAME = "eminimal";
 constexpr uint8_t AP_CHANNEL = 1;
 // One seat per phone, so the access point has to hold the whole table.
 constexpr uint8_t AP_MAX_CONNECTIONS = party::MAX_PLAYERS;
-constexpr uint16_t DNS_PORT = 53;
-constexpr int QR_MAX_SIZE = 198;
-
-DNSServer* dnsServer = nullptr;
-
-void stopDnsServer() {
-  if (!dnsServer) return;
-  dnsServer->stop();
-  delete dnsServer;
-  dnsServer = nullptr;
-}
 }  // namespace
 
 void GameNightActivity::onEnter() {
@@ -61,54 +47,29 @@ void GameNightActivity::onExit() {
   state = State::SHUTTING_DOWN;
 
   server.reset();
-  stopDnsServer();
-  MDNS.end();
+  // Read before the portal drops the AP: that leaves the mode NULL too.
+  const bool wifiWasOn = WiFi.getMode() != WIFI_MODE_NULL;
+  portal.end();
 
   // Tearing WiFi down leaves the heap fragmented enough to hurt the reader, and
   // file transfer already answers that the same way.
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.softAPdisconnect(true);
-    delay(30);
-    silentRestart();
-  }
+  if (wifiWasOn) silentRestart();
   LOG_DBG("GAMES", "Free heap at onExit: %d bytes", ESP.getFreeHeap());
 }
 
 void GameNightActivity::startAccessPoint() {
   LOG_DBG("GAMES", "Starting game night access point");
-  WiFi.mode(WIFI_AP);
-  delay(100);
-
-  if (!WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, false, AP_MAX_CONNECTIONS)) {
+  // Open, with the captive DNS that makes joining the network enough to land
+  // on the game page.
+  PhonePortal::Config config;
+  config.ssid = AP_SSID;
+  config.channel = AP_CHANNEL;
+  config.maxClients = AP_MAX_CONNECTIONS;
+  config.hostname = AP_HOSTNAME;
+  if (!portal.begin(config)) {
     LOG_ERR("GAMES", "Failed to start the access point");
     onGoHome();
     return;
-  }
-  delay(100);
-
-  const IPAddress ip = WiFi.softAPIP();
-  char buffer[24];
-  snprintf(buffer, sizeof(buffer), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-  apIp = buffer;
-  apSsid = AP_SSID;
-  // Wi-Fi network config QR, per the zxing barcode contents spec.
-  joinPayload = std::string("WIFI:T:nopass;S:") + AP_SSID + ";;";
-  pageUrl = std::string("http://") + apIp + "/";
-
-  MDNS.end();
-  if (MDNS.begin(AP_HOSTNAME)) {
-    LOG_DBG("GAMES", "mDNS started: http://%s.local/", AP_HOSTNAME);
-  }
-
-  // Captive portal: every DNS lookup resolves here, so joining the network is
-  // enough to land on the game page.
-  stopDnsServer();
-  dnsServer = new (std::nothrow) DNSServer();
-  if (dnsServer) {
-    dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
-    dnsServer->start(DNS_PORT, "*", ip);
-  } else {
-    LOG_ERR("GAMES", "OOM: DNS server, phones will need the URL typed in");
   }
 
   startServer();
@@ -170,7 +131,7 @@ void GameNightActivity::loop() {
   // itself, so read them before it runs and again inside it.
   if (handleInput()) return;
 
-  if (dnsServer) dnsServer->processNextRequest();
+  portal.loop();
 
   // Same shape as the file-transfer loop: pump hard, reset the watchdog, and
   // keep reading buttons from inside the burst so the device stays responsive
@@ -198,31 +159,24 @@ void GameNightActivity::loop() {
 void GameNightActivity::renderLobby(const Rect& content) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int smallHeight = renderer.getLineHeight(SMALL_FONT_ID);
 
-  // Two codes: one joins the network, one opens the page. Phones that follow
-  // the captive portal never need the second, and plenty do not.
-  const int columnWidth = content.width / 2;
-  // Two fifths of the content band, so the seat list underneath still has room
-  // on a landscape panel.
-  const int qrSize = std::min({QR_MAX_SIZE, columnWidth - metrics.verticalSpacing * 2, content.height * 2 / 5});
-  const int qrTop = content.y + lineHeight + 4;
+  // The join card every phone screen paints, in the upper three fifths so the
+  // seat list underneath still has room on a landscape panel. Phones that
+  // follow the captive portal never need its second code, and plenty do not.
+  const std::string hostnameUrl = portal.hostnameUrl();
+  const std::string altUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + hostnameUrl.substr(sizeof("http://") - 1);
+  PhoneJoinPanel::Content card;
+  card.portal = &portal;
+  card.pageUrl = portal.pageUrl();
+  card.pageAlt = altUrl.c_str();
+  const Rect cardBounds(0, content.y, renderer.getScreenWidth(), content.height * 3 / 5);
+  const int cardBottom = PhoneJoinPanel::draw(renderer, cardBounds, card);
 
-  renderer.drawText(UI_10_FONT_ID, content.x, content.y, tr(STR_GAMES_SCAN_JOIN), true, EpdFontFamily::BOLD);
-  QrUtils::drawQrCode(renderer, Rect(content.x, qrTop, qrSize, qrSize), joinPayload);
-  renderer.drawText(SMALL_FONT_ID, content.x, qrTop + qrSize + 2, apSsid.c_str());
-
-  const int rightX = content.x + columnWidth;
-  renderer.drawText(UI_10_FONT_ID, rightX, content.y, tr(STR_GAMES_SCAN_OPEN), true, EpdFontFamily::BOLD);
-  QrUtils::drawQrCode(renderer, Rect(rightX, qrTop, qrSize, qrSize), pageUrl);
-  renderer.drawText(SMALL_FONT_ID, rightX, qrTop + qrSize + 2, pageUrl.c_str());
-
-  const int listTop = qrTop + qrSize + smallHeight + metrics.verticalSpacing * 2;
+  const int listTop = cardBottom + metrics.verticalSpacing * 2;
   renderer.drawText(UI_10_FONT_ID, content.x, listTop, tr(STR_GAMES_PLAYERS), true, EpdFontFamily::BOLD);
-  games::drawSeatList(
-      renderer, session,
-      Rect(content.x, listTop + lineHeight + 4, content.width, content.y + content.height - (listTop + lineHeight + 4)),
-      millis());
+  const int seatsTop = listTop + lineHeight + metrics.verticalSpacing;
+  const Rect seats(content.x, seatsTop, content.width, content.y + content.height - seatsTop);
+  games::drawSeatList(renderer, session, seats, millis());
 }
 
 void GameNightActivity::renderRound(const Rect& content) const {
@@ -231,7 +185,7 @@ void GameNightActivity::renderRound(const Rect& content) const {
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
     renderer.drawText(UI_10_FONT_ID, content.x, content.y + content.height - lineHeight, tr(STR_GAMES_ROUND_OVER), true,
                       EpdFontFamily::BOLD);
-    board.height -= lineHeight + 4;
+    board.height -= lineHeight + UITheme::scaledPx(4);
   }
   games::drawBoard(renderer, session, board);
 }
@@ -265,13 +219,20 @@ void GameNightActivity::render(RenderLock&&) {
 
   if (inLobby) {
     renderLobby(content);
-    GUI.drawSideButtonHints(renderer, tr(STR_GAMES_PREV_GAME), tr(STR_GAMES_NEXT_GAME));
   } else {
     renderRound(content);
   }
 
+  // Up/Down pick the game in the lobby: the side keys on the X4, the third and
+  // fourth front keys on the five-button board.
+  const bool fiveButton = five_button::active();
+  if (inLobby && !fiveButton) {
+    GUI.drawSideButtonHints(renderer, tr(STR_GAMES_PREV_GAME), tr(STR_GAMES_NEXT_GAME));
+  }
+  const char* upLabel = inLobby && fiveButton ? tr(STR_GAMES_PREV_GAME) : "";
+  const char* downLabel = inLobby && fiveButton ? tr(STR_GAMES_NEXT_GAME) : "";
   const auto labels = mappedInput.mapLabels(inLobby ? tr(STR_EXIT) : tr(STR_GAMES_END_ROUND),
-                                            inLobby ? tr(STR_GAMES_START) : tr(STR_GAMES_NEXT), "", "");
+                                            inLobby ? tr(STR_GAMES_START) : tr(STR_GAMES_NEXT), upLabel, downLabel);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   // Fast refreshes keep the table moving; a full one every few paints clears the

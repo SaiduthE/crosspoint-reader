@@ -8,13 +8,15 @@
 #include "activities/Activity.h"
 #include "components/themes/BaseTheme.h"
 #include "network/GameServer.h"
+#include "network/PhonePortal.h"
 
 // Game night: the reader becomes the table.
 //
-// It raises its own open access point, shows two QR codes (one joins the Wi-Fi,
-// one opens the page), and serves every phone a view of the same session. The
-// e-ink panel is the board everyone looks at; the phones hold whatever has to
-// stay private - a dice cup, a secret word, a spymaster's key.
+// It raises an open access point through PhonePortal, shows the join card
+// (one QR joins the Wi-Fi, one opens the page), and serves every phone a view
+// of the same session. The e-ink panel is the board everyone looks at; the
+// phones hold whatever has to stay private - a dice cup, a secret word, a
+// spymaster's key.
 class GameNightActivity final : public Activity {
  public:
   explicit GameNightActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -44,10 +46,7 @@ class GameNightActivity final : public Activity {
   State state = State::AP_STARTING;
   party::GameSession session;
   std::unique_ptr<GameServer> server;
-  std::string apIp;
-  std::string apSsid;
-  std::string joinPayload;
-  std::string pageUrl;
+  PhonePortal portal;
 
   // Repaints are driven by the session version, not by polling: a phone asking
   // for state 8 times a second must not cost a panel refresh.

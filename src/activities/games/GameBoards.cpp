@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace games {
@@ -18,6 +19,9 @@ using party::Ludo;
 using party::Undercover;
 
 constexpr int TILE_GAP = 4;
+
+// Hand-placed spacing below is written at 1x; the panel's UI scale applies.
+int px(const int v) { return UITheme::scaledPx(v); }
 
 // Centres one line of text in a box. Everything drawn here is a short label, so
 // there is no wrapping: the caller sizes the box from getTextWidth() when it
@@ -141,15 +145,15 @@ void ludoStatus(const GameSession& session, const Ludo& game, char* out, const s
 void drawUndercover(const GfxRenderer& renderer, const GameSession& session, const Undercover& game,
                     const Rect& content) {
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int rowHeight = lineHeight + 14;
+  const int rowHeight = lineHeight + px(14);
+  const int gap = px(TILE_GAP);
   const int columns = content.width > 2 * content.height ? 2 : 1;
-  const int columnWidth = (content.width - (columns - 1) * TILE_GAP) / columns;
+  const int columnWidth = (content.width - (columns - 1) * gap) / columns;
 
   for (uint8_t seat = 0; seat < game.seats(); seat++) {
     const int column = columns == 1 ? 0 : seat % columns;
     const int row = columns == 1 ? seat : seat / columns;
-    const Rect box(content.x + column * (columnWidth + TILE_GAP), content.y + row * rowHeight, columnWidth,
-                   rowHeight - TILE_GAP);
+    const Rect box(content.x + column * (columnWidth + gap), content.y + row * rowHeight, columnWidth, rowHeight - gap);
     if (box.y + box.height > content.y + content.height) break;
 
     const bool out = !game.alive(seat);
@@ -157,7 +161,7 @@ void drawUndercover(const GfxRenderer& renderer, const GameSession& session, con
 
     char label[40];
     snprintf(label, sizeof(label), "%u  %s", seat + 1, session.player(seat).name);
-    renderer.drawText(UI_10_FONT_ID, box.x + 10, box.y + (box.height - lineHeight) / 2, label, true,
+    renderer.drawText(UI_10_FONT_ID, box.x + px(10), box.y + (box.height - lineHeight) / 2, label, true,
                       out ? EpdFontFamily::ITALIC : EpdFontFamily::REGULAR);
 
     char right[24];
@@ -169,12 +173,12 @@ void drawUndercover(const GfxRenderer& renderer, const GameSession& session, con
       snprintf(right, sizeof(right), "%u vote%s", game.votesAgainst(seat), game.votesAgainst(seat) == 1 ? "" : "s");
     }
     const int rightWidth = renderer.getTextWidth(SMALL_FONT_ID, right);
-    renderer.drawText(SMALL_FONT_ID, box.x + box.width - rightWidth - 10,
+    renderer.drawText(SMALL_FONT_ID, box.x + box.width - rightWidth - px(10),
                       box.y + (box.height - renderer.getLineHeight(SMALL_FONT_ID)) / 2, right);
 
     if (out) {
       const int middle = box.y + box.height / 2;
-      renderer.drawLine(box.x + 6, middle, box.x + box.width - 6, middle, true);
+      renderer.drawLine(box.x + px(6), middle, box.x + box.width - px(6), middle, true);
     }
   }
 }
@@ -182,18 +186,19 @@ void drawUndercover(const GfxRenderer& renderer, const GameSession& session, con
 // --- codenames ---------------------------------------------------------------
 
 void drawCodenames(const GfxRenderer& renderer, const Codenames& game, const Rect& content) {
-  const int legendHeight = renderer.getLineHeight(SMALL_FONT_ID) + 10;
+  const int legendHeight = renderer.getLineHeight(SMALL_FONT_ID) + px(10);
   const int gridHeight = content.height - legendHeight;
-  const int tileWidth = (content.width - (Codenames::GRID - 1) * TILE_GAP) / Codenames::GRID;
-  const int tileHeight = (gridHeight - (Codenames::GRID - 1) * TILE_GAP) / Codenames::GRID;
+  const int gap = px(TILE_GAP);
+  const int crossInset = px(4);
+  const int tileWidth = (content.width - (Codenames::GRID - 1) * gap) / Codenames::GRID;
+  const int tileHeight = (gridHeight - (Codenames::GRID - 1) * gap) / Codenames::GRID;
 
   for (uint8_t tile = 0; tile < Codenames::TILES; tile++) {
     const int column = tile % Codenames::GRID;
     const int row = tile / Codenames::GRID;
-    const Rect box(content.x + column * (tileWidth + TILE_GAP), content.y + row * (tileHeight + TILE_GAP), tileWidth,
-                   tileHeight);
+    const Rect box(content.x + column * (tileWidth + gap), content.y + row * (tileHeight + gap), tileWidth, tileHeight);
     const char* tileText = game.tileWord(tile);
-    const int fontId = fontThatFits(renderer, tileText, box.width - 8);
+    const int fontId = fontThatFits(renderer, tileText, box.width - px(8));
 
     if (!game.revealed(tile)) {
       renderer.drawRect(box.x, box.y, box.width, box.height, 1, true);
@@ -213,27 +218,30 @@ void drawCodenames(const GfxRenderer& renderer, const Codenames& game, const Rec
         break;
       case Codenames::ASSASSIN:
         renderer.fillRect(box.x, box.y, box.width, box.height, true);
-        renderer.drawLine(box.x + 4, box.y + 4, box.x + box.width - 4, box.y + box.height - 4, 2, false);
-        renderer.drawLine(box.x + box.width - 4, box.y + 4, box.x + 4, box.y + box.height - 4, 2, false);
+        renderer.drawLine(box.x + crossInset, box.y + crossInset, box.x + box.width - crossInset,
+                          box.y + box.height - crossInset, 2, false);
+        renderer.drawLine(box.x + box.width - crossInset, box.y + crossInset, box.x + crossInset,
+                          box.y + box.height - crossInset, 2, false);
         centerText(renderer, fontId, box, tileText, false, EpdFontFamily::BOLD);
         break;
       default:
         renderer.drawRect(box.x, box.y, box.width, box.height, 1, true);
         centerText(renderer, fontId, box, tileText);
-        renderer.drawLine(box.x + 6, box.y + box.height / 2, box.x + box.width - 6, box.y + box.height / 2, true);
+        renderer.drawLine(box.x + px(6), box.y + box.height / 2, box.x + box.width - px(6), box.y + box.height / 2,
+                          true);
         break;
     }
   }
 
   // Legend: on a monochrome panel the teams are a fill pattern, so say which.
-  const int legendY = content.y + gridHeight + 4;
-  const int swatch = renderer.getLineHeight(SMALL_FONT_ID) - 2;
+  const int legendY = content.y + gridHeight + px(4);
+  const int swatch = renderer.getLineHeight(SMALL_FONT_ID) - px(2);
   int x = content.x;
   const auto legendEntry = [&](const uint8_t style, const char* text) {
     drawSwatch(renderer, Rect(x, legendY, swatch, swatch), style);
-    x += swatch + 4;
+    x += swatch + px(4);
     renderer.drawText(SMALL_FONT_ID, x, legendY, text);
-    x += renderer.getTextWidth(SMALL_FONT_ID, text) + 14;
+    x += renderer.getTextWidth(SMALL_FONT_ID, text) + px(14);
   };
 
   char red[24];
@@ -249,8 +257,8 @@ void drawCodenames(const GfxRenderer& renderer, const Codenames& game, const Rec
 
 void drawFleetGrid(const GfxRenderer& renderer, const Battleship& game, const uint8_t player, const Rect& box,
                    const char* title) {
-  const int titleHeight = renderer.getLineHeight(SMALL_FONT_ID) + 2;
-  const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, "10") + 3;
+  const int titleHeight = renderer.getLineHeight(SMALL_FONT_ID) + px(2);
+  const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, "10") + px(3);
   const int available = std::min(box.width - labelWidth, box.height - titleHeight - titleHeight);
   const int cell = available / Battleship::SIZE;
   const int gridLeft = box.x + labelWidth;
@@ -264,10 +272,12 @@ void drawFleetGrid(const GfxRenderer& renderer, const Battleship& game, const ui
     centerText(renderer, SMALL_FONT_ID, Rect(gridLeft + i * cell, gridTop - titleHeight, cell, titleHeight), label);
     snprintf(label, sizeof(label), "%u", i + 1);
     const int width = renderer.getTextWidth(SMALL_FONT_ID, label);
-    renderer.drawText(SMALL_FONT_ID, gridLeft - width - 3,
+    renderer.drawText(SMALL_FONT_ID, gridLeft - width - px(3),
                       gridTop + i * cell + (cell - renderer.getLineHeight(SMALL_FONT_ID)) / 2, label);
   }
 
+  const int sunkPip = px(2);
+  const int missPip = px(3);
   for (uint8_t y = 0; y < Battleship::SIZE; y++) {
     for (uint8_t x = 0; x < Battleship::SIZE; x++) {
       const Rect cellBox(gridLeft + x * cell, gridTop + y * cell, cell, cell);
@@ -278,11 +288,13 @@ void drawFleetGrid(const GfxRenderer& renderer, const Battleship& game, const ui
           if (game.sunkAt(player, x, y)) {
             // A sunk ship's cells keep a white pip so a whole hull reads as one
             // shape instead of a blob of separate hits.
-            renderer.fillRect(cellBox.x + cellBox.width / 2 - 1, cellBox.y + cellBox.height / 2 - 1, 2, 2, false);
+            renderer.fillRect(cellBox.x + (cellBox.width - sunkPip) / 2, cellBox.y + (cellBox.height - sunkPip) / 2,
+                              sunkPip, sunkPip, false);
           }
           break;
         case Battleship::MISS:
-          renderer.fillRect(cellBox.x + cellBox.width / 2 - 1, cellBox.y + cellBox.height / 2 - 1, 3, 3, true);
+          renderer.fillRect(cellBox.x + (cellBox.width - missPip) / 2, cellBox.y + (cellBox.height - missPip) / 2,
+                            missPip, missPip, true);
           break;
         default:
           break;
@@ -293,21 +305,22 @@ void drawFleetGrid(const GfxRenderer& renderer, const Battleship& game, const ui
   char footer[32];
   snprintf(footer, sizeof(footer), "%u afloat%s", game.shipsLeft(player),
            game.phase() == Battleship::Phase::Place ? (game.ready(player) ? " - ready" : " - placing") : "");
-  renderer.drawText(SMALL_FONT_ID, box.x, gridTop + Battleship::SIZE * cell + 2, footer);
+  renderer.drawText(SMALL_FONT_ID, box.x, gridTop + Battleship::SIZE * cell + px(2), footer);
 }
 
 void drawBattleship(const GfxRenderer& renderer, const GameSession& session, const Battleship& game,
                     const Rect& content) {
   const bool sideBySide = content.width >= content.height;
-  const int halfWidth = sideBySide ? (content.width - TILE_GAP * 4) / 2 : content.width;
-  const int halfHeight = sideBySide ? content.height : (content.height - TILE_GAP * 4) / 2;
+  const int gap = px(TILE_GAP * 4);
+  const int halfWidth = sideBySide ? (content.width - gap) / 2 : content.width;
+  const int halfHeight = sideBySide ? content.height : (content.height - gap) / 2;
 
   for (uint8_t player = 0; player < Battleship::PLAYERS; player++) {
     char title[32];
     snprintf(title, sizeof(title), "%s%s", session.isSeated(player) ? session.player(player).name : "empty seat",
              game.phase() == Battleship::Phase::Fire && game.turn() == player ? "  <- to fire" : "");
-    const Rect box(content.x + (sideBySide ? player * (halfWidth + TILE_GAP * 4) : 0),
-                   content.y + (sideBySide ? 0 : player * (halfHeight + TILE_GAP * 4)), halfWidth, halfHeight);
+    const Rect box(content.x + (sideBySide ? player * (halfWidth + gap) : 0),
+                   content.y + (sideBySide ? 0 : player * (halfHeight + gap)), halfWidth, halfHeight);
     drawFleetGrid(renderer, game, player, box, title);
   }
 }
@@ -354,9 +367,9 @@ void drawToken(const GfxRenderer& renderer, const uint8_t player, const Rect& ce
 }
 
 void drawLudo(const GfxRenderer& renderer, const GameSession& session, const Ludo& game, const Rect& content) {
-  const bool sideLegend = content.width > content.height + 140;
-  const int boardSide =
-      std::min(sideLegend ? content.width - 150 : content.width, sideLegend ? content.height : content.height - 90);
+  const bool sideLegend = content.width > content.height + px(140);
+  const int boardSide = std::min(sideLegend ? content.width - px(150) : content.width,
+                                 sideLegend ? content.height : content.height - px(90));
   const int cell = boardSide / Ludo::GRID;
   const int boardLeft = content.x + (sideLegend ? 0 : (content.width - cell * Ludo::GRID) / 2);
   const int boardTop = content.y;
@@ -421,11 +434,11 @@ void drawLudo(const GfxRenderer& renderer, const GameSession& session, const Lud
   }
 
   // Legend: which seat is which token, and how far along they are.
-  const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID) + 4;
-  const int legendLeft = sideLegend ? boardLeft + cell * Ludo::GRID + 12 : content.x;
-  int legendY = sideLegend ? content.y : boardTop + cell * Ludo::GRID + 8;
+  const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID) + px(4);
+  const int legendLeft = sideLegend ? boardLeft + cell * Ludo::GRID + px(12) : content.x;
+  int legendY = sideLegend ? content.y : boardTop + cell * Ludo::GRID + px(8);
   for (uint8_t player = 0; player < game.players(); player++) {
-    const Rect swatch(legendLeft, legendY, lineHeight - 6, lineHeight - 6);
+    const Rect swatch(legendLeft, legendY, lineHeight - px(6), lineHeight - px(6));
     drawToken(renderer, player, Rect(swatch.x - 2, swatch.y - 2, swatch.width + 4, swatch.height + 4), false);
     char label[48];
     snprintf(label, sizeof(label), "%s%s  %u home", session.isSeated(player) ? session.player(player).name : "empty",
@@ -437,7 +450,7 @@ void drawLudo(const GfxRenderer& renderer, const GameSession& session, const Lud
   if (game.die() > 0) {
     char die[24];
     snprintf(die, sizeof(die), "Die: %u", game.die());
-    renderer.drawText(UI_10_FONT_ID, legendLeft, legendY + 4, die, true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, legendLeft, legendY + px(4), die, true, EpdFontFamily::BOLD);
   }
 }
 
@@ -493,7 +506,7 @@ void statusFor(const GameSession& session, char* out, const size_t cap) {
 
 void drawSeatList(const GfxRenderer& renderer, const GameSession& session, const Rect& content, const uint32_t nowMs) {
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int rowHeight = lineHeight + 8;
+  const int rowHeight = lineHeight + px(8);
   int y = content.y;
 
   if (session.playerCount() == 0) {

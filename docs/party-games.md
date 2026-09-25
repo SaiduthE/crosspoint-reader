@@ -1,8 +1,8 @@
 # Party games
 
 Game Night turns the reader into the shared board for a table of people. The
-device raises its own open access point and shows two QR codes: one joins the
-Wi-Fi, one opens the page. Every phone that joins gets a private view of the
+device raises an open access point and shows the same join card as File
+Transfer: one QR joins the Wi-Fi, one opens the page. Every phone that joins gets a private view of the
 same session — a dice cup, a secret word, a spymaster's key — while the e-ink
 panel shows the one thing everybody is allowed to see.
 
@@ -12,11 +12,13 @@ beyond the reader itself.
 ## Starting a game night
 
 1. **File Transfer → Game Night** on the device.
-2. The reader starts the `CrossPoint-Games` access point (open, up to eight
-   stations) and shows the lobby.
+2. The reader starts the `eMinimal Games` access point through `PhonePortal`
+   (open, up to eight stations, captive DNS, mDNS `eminimal`) and shows the
+   lobby: the `PhoneJoinPanel` card above the seat list.
 3. Players scan the left QR to join the network. Most phones then open the page
    by themselves through the captive portal; the right QR (and
-   `http://192.168.4.1/`) is there for the ones that do not.
+   `http://192.168.4.1/` or `http://eminimal.local/`) is there for the ones that
+   do not.
 4. The first player to join is the host. The host picks the game, from their
    phone or with the device's own buttons, and starts it.
 
@@ -24,7 +26,7 @@ beyond the reader itself.
 
 | Screen | Button | Action |
 |--------|--------|--------|
-| Lobby | Up / Down | Previous / next game |
+| Lobby | Up / Down | Previous / next game (side keys on the X4, the third and fourth front keys on the five-button board) |
 | Lobby | Confirm | Start the selected game |
 | Lobby | Back | Leave game night |
 | Round | Confirm | The host's "next": deal again, or push the phase along |
@@ -74,7 +76,7 @@ coming home, and three sixes in a row forfeits the turn.
 | Rules, seats, JSON views | `lib/PartyGames/` | nothing — plain C++ |
 | HTTP surface | `src/network/GameServer.cpp` | Arduino `WebServer` |
 | Phone page | `src/network/html/PlayPage.html` | nothing, baked into flash |
-| Screen, access point, lifecycle | `src/activities/games/GameNightActivity.cpp` | the activity stack |
+| Screen, access point, lifecycle | `src/activities/games/GameNightActivity.cpp` | the activity stack, `PhonePortal`, `PhoneJoinPanel` |
 | Board pixels | `src/activities/games/GameBoards.cpp` | `GfxRenderer` |
 
 The split is the point. `lib/PartyGames` has no Arduino and no renderer in it,

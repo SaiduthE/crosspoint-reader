@@ -582,8 +582,6 @@ STR_SAVE: "Save"
 
 STR_GAME_NIGHT: "Game Night"
 STR_GAME_NIGHT_DESC: "Play together on this screen - phones join by QR"
-STR_GAMES_SCAN_JOIN: "1. Scan to join the Wi-Fi"
-STR_GAMES_SCAN_OPEN: "2. Scan to open the game"
 STR_GAMES_PLAYERS: "At the table"
 STR_GAMES_NO_PLAYERS: "No one has joined yet"
 STR_GAMES_START: "Start"
