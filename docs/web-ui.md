@@ -1,14 +1,16 @@
 # The web UI — design contract
 
 The pages the reader serves to a phone or laptop: Home, Files, Settings, Fonts,
-and the Wi-Fi setup page. This is the contract every page is built against so
-they read as one product. Anything not covered here follows the reference
-implementation in `src/network/html/HomePage.html`.
+the Wi-Fi setup page, and the phone text-entry page (`TextEntryPage.html`).
+This is the contract every page is built against so they read as one
+product. Anything not covered here follows the reference implementation in
+`src/network/html/HomePage.html`.
 
 ## Subject and job
 
-An e-ink reader, **e-Minimal**, with four buttons and no keyboard. These pages
-exist because a phone has the keyboard and the file picker the device lacks.
+An e-ink reader, **e-Minimal**, with five buttons (Up, Down, Select, Back,
+Power) and no keyboard. These pages exist because a phone has the keyboard
+and the file picker the device lacks.
 The primary job is *get a book onto the card from a phone in under a minute*;
 the secondary jobs are changing reading settings and adding fonts. Most visits
 happen on a phone held in one hand, some on a laptop, occasionally inside a
@@ -216,3 +218,11 @@ Dark mode: tokens only; no component overrides.
   `.card` under a serif `h1` "Connect your reader to Wi-Fi"; the form and the
   status logic stay as they are; restyle with `.field`, `.btn-primary`,
   `.chip`. Keep its inline CSS to the few rules the card needs beyond app.css.
+- **Phone text entry** (`TextEntryPage.html`, served by its own
+  `TextEntryServer` alongside `/css/app.css`, no `/js/app.js`): same
+  no-shell shape as Wi-Fi setup. A single centred `.card` under a serif `h1`
+  with one `<input>` (type driven by the field's `kind`: text, password gets
+  a Show toggle, or url), a "Send to reader" `.btn-primary`, and a status
+  line; locks the form after a successful send ("Sent. You can close this
+  page."). Fills the title and any prefilled value via `textContent`/`.value`
+  only, never innerHTML — titles and filenames can contain `<`.

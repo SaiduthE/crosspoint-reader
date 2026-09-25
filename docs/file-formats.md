@@ -90,6 +90,17 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 48
+
+Version 48 keeps the version 47 serialized layout unchanged. It was bumped
+because pictures at least 300 px in each dimension, with no CSS sizing of
+their own, may now scale up to fit their container and the viewport instead
+of only ever scaling down (fork commit `6b5415de`); smaller images (icons,
+drop caps, ornaments) keep their original size. The serialized format is
+unchanged; the bump invalidates caches because image sizes, and therefore
+pagination, now differ, so older caches are rebuilt to match what the reader
+now renders.
+
 ### Version 47
 
 The section header adds signed `characterSpacing` (pixels) and unsigned
@@ -191,7 +202,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 47
+#define EXPECTED_VERSION 48
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
